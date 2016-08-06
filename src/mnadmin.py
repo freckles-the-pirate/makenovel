@@ -24,6 +24,7 @@ def create_project(name, title):
     projdir=os.path.join(CURRDIR, name)
     os.makedirs(projdir)
     os.mkdirs(os.path.join(projdir, '.novel'))
+    
 
 def main():
     args = parser.parse_args(sys.argv[1:])
