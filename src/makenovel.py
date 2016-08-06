@@ -3,7 +3,16 @@
 import sys
 import os
 import argparse
+import csv
 from models import *
+
+PROJDIR = os.path.abspath('.')
+DATADIR = os.path.join(PROJDIR, '.novel')
+NOVELFILE = os.path.join(DATADIR, 'novel')
+CHAPTERSFILE = os.path.join(DATADIR, 'chapters.csv')
+PLOTLINESFILE = os.path.join(DATADIR, 'plotlines.csv')
+VERSIONSFILE = os.path.join(DATADIR, 'versions.csv')
+DRAFTSFILE = os.path.join(DATADIR, 'drafts.csv')
 
 """ Construct the parsers
 """
@@ -45,7 +54,7 @@ parser_add_plotline.add_argument('-d', '--description',
 parser_add_part = subparsers_add.add_parser('part')
 parser_add_part.add_argument('-t', '--tag', help=TAG_HELP,
     required=True)
-parser_add_part.add_argument('title', "Formal title, e.g. 'Part 1'")
+parser_add_part.add_argument('title', help="Formal title, e.g. 'Part 1'")
 part_order = parser_add_part.add_mutually_exclusive_group()
 part_order.add_argument('-b', '--before', nargs=1,
     metavar='PART_TAG',
@@ -143,9 +152,97 @@ parser_bind = subparsers.add_parser('bind')
 parser_bind.add_argument('-d', '--draft',
     help="Tag of the draft to use. If omitted, latest draft will be used.")
 
+def get_novel(config={}):
+    
+    if not os.path.exists(DATADIR):
+        print("Directory %s does not exist. Creating..." % DATADIR)
+        os.makedirs(DATADIR)
+    for datafile in [NOVELFILE, CHAPTERSFILE, PLOTLINESFILE,
+        VERSIONSFILE, DRAFTSFILE]:
+            if not os.path.exists(datafile):
+                print("    creating %s" % datafile)
+                open(datafile, 'x').close()
+    
+    with open(NOVELFILE) as novelfile:
+        lines = novelfile.readlines()
+        novelfile.close()
+    
+    data = {}
+    for line in lines:
+        if (line[0] != '#'):
+            l = line.strip().split('=')
+            data.update({l[0]: l[1]})
+            print("data: %s" % data)
+    
+    title = data.get('title')
+    author = Author(config.get('first_name'),
+        config.get('last_name'),
+        config.get('middle_name'),
+        config.get('email_address'),
+        config.get('phone_number'),
+        config.get('street_address'),
+        config.get('city'),
+        config.get('state'))
+    
+    novel = Novel(title, author, config)
+    chapters=[]
+
+    # Parse the chapters
+    
+    with open(CHAPTERSFILE) as chaptersfile:
+        ch_reader = csv.reader(chaptersfile)
+        for row in ch_reader:
+            chapters.append(Chapter(row[0], row[1], novel, row[2]))
+        chaptersfile.close()
+    
+    novel.chapters = chapters
+    
+    # Parse the versions
+    
+    with open(VERSIONSFILE) as versionsfile:
+        v_reader = csv.reader(versionsfile)
+        for row in v_reader:
+            versions.append(Version(row[0], row[1], row[2], novel,
+                row[3]))
+    
+    return novel
+
+def list_plotlines(novel):
+    print("Plotlines")
+    print("%20s%20s" % ("tag", "description"))
+    print("%s+%s" % ("=" * 20, "=" * 20))
+    for plotline in novel.plotlines:
+        print ("%20s%20s" % (plotline.tag, plotline.description))
+
+def list_parts(novel):
+    pass
+
+def list_chapters(novel):
+    pass
+
+def list_versions(novel):
+    pass
+
+def list_drafts(novel):
+    pass
+
 def main(argv):
     args = parser.parse_args(argv[1:])
-    print(args)
+    
+    novel = get_novel()
+    
+    if parser_list:
+        obj = parser_list.parse_args(argv[2:]).object
+        if obj == 'plotlines':
+            list_plotlines(novel)        
+        elif obj == 'parts':
+            list_parts(novel)
+        elif obj == 'chapters':
+            list_chapters(novel)
+        elif obj == 'versions':
+            list_versions(novel)
+        elif obj == 'drafts':
+            list_drafts(novel)
 
 if __name__=="__main__":
     main(sys.argv)
