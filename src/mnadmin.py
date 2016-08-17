@@ -39,7 +39,7 @@ def create_project(name, title, branch):
     if not os.path.exists(dest_data_dir):
         os.makedirs(dest_data_dir)
     
-    for f in ("novel", "chapters.csv", "plotlines.csv", "versions.csv",
+    for f in ("novel", "chapters.csv", "parts.csv", "plotlines.csv", "versions.csv",
         "drafts.csv"):
             tf = os.path.join(dest_data_dir, f)
             if not os.path.exists(tf):

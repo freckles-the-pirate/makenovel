@@ -61,8 +61,6 @@ parser_add_plotline.set_defaults(which='add_plotline')
 
 ### "Add parts" subparser ###
 parser_add_part = subparsers_add.add_parser('part')
-parser_add_part.add_argument('-t', '--tag', help=TAG_HELP,
-    required=True)
 parser_add_part.add_argument('title', help="Formal title, e.g. 'Part 1'")
 part_order = parser_add_part.add_mutually_exclusive_group()
 part_order.add_argument('-b', '--before',
@@ -111,10 +109,25 @@ subparsers_edit = parser_edit.add_subparsers()
 parser_update = subparsers.add_parser('update')
 subparsers_update = parser_update.add_subparsers()
 
+# "update part" subparser
+parser_update_part = subparsers_update.add_parser('part')
+parser_update_part.add_argument('-t', '--title')
+parser_update_part.add_argument('tag')
+part_update_order = parser_update_part.add_mutually_exclusive_group()
+part_update_order.add_argument('-b', '--before',
+    metavar='PART_TAG',
+    help='Add this part before `PART_TAG`')
+part_update_order.add_argument('-p', '--parent',
+    metavar='PARENT',
+    help='Add this part below `PART_TAG`')
+part_update_order.add_argument('-a', '--after',
+    metavar='part_tag',
+    help='Add this part after `PART_TAG`')
+
 ### "update plotline" subparser ###
 parser_update_plotline = subparsers_update.add_parser('plotline')
-parser_update_plotline.add_argument('-t', '--tag', help=TAG_HELP,
-    required=True)
+parser_update_plotline.add_argument('tag')
+parser_update_plotline.add_argument('-t', '--new-tag')
 parser_update_plotline.add_argument('-d', '--description',
     help="What happens in this plotline?")
 parser_update_plotline.set_defaults(which='update_plotline')
@@ -124,7 +137,7 @@ parser_edit_chapter = subparsers_edit.add_parser('chapter')
 parser_edit_chapter.add_argument('-e', '--editor',
     help='Full path to an alternative editor', type=str)
 parser_edit_chapter_continue = parser_edit_chapter.add_mutually_exclusive_group(required=True)
-parser_edit_chapter_continue.add_argument('-t', '--tag', type=str,
+parser_edit_chapter_continue.add_argument('--tag', type=str,
     help='Chapter tag to edit.')
 parser_edit_chapter_continue.add_argument('-c', '--continue',
     help='Continue editing where you last left off',
@@ -133,6 +146,7 @@ parser_edit_chapter.set_defaults(which='edit_chapter')
 
 ### "update chapter" subparser ###
 parser_update_chapter = subparsers_update.add_parser('chapter')
+parser_update_chapter.add_argument('-t', '--title')
 parser_update_chapter.add_argument('-p', '--plotline',
     help='Plotline associated with the chapter',
     nargs=1,
@@ -190,6 +204,9 @@ def get_novel(config={}):
                 print("    creating %s" % datafile)
                 open(datafile).close()
     
+    env = NovelEnvironment(projdir=PROJDIR)
+    novel = Novel(env=env)
+    
     with open(NOVELFILE) as novelfile:
         lines = novelfile.readlines()
         novelfile.close()
@@ -199,7 +216,6 @@ def get_novel(config={}):
         if (line[0] != '#'):
             l = line.strip().split('=')
             data.update({l[0]: l[1]})
-            #print("data: %s" % data)
     
     title = data.get('title')
     author = Author(config.get('first_name'),
@@ -211,9 +227,9 @@ def get_novel(config={}):
         config.get('city'),
         config.get('state'))
     
-    env = NovelEnvironment(projdir=PROJDIR)
-    
-    novel = Novel(title, author, config, env=env)
+    novel.title = title
+    novel.author = author
+    novel.config = config
     chapters=[]
     plotlines=[]
     
@@ -226,8 +242,7 @@ def get_novel(config={}):
     with open(VERSIONSFILE) as versionsfile:
         v_reader = csv.reader(versionsfile)
         for row in v_reader:
-            versions.append(Version(row[0], row[1], row[2], novel,
-                row[3]))
+            versions.append(Version(row[0], row[1], row[2], novel, row[3]))
     
     return novel
 
@@ -288,16 +303,35 @@ def show_novel(novel):
     print()
     print("Keep up the good work!")
 
-def show_parts(novel):
+def show_part(novel, part_tag):
+    part = novel.find_part(part_tag)
+    if part is None:
+        print("%s: Part not found" % part_tag)
+        sys.exit(1)
+    wc = 0
+    for ch in part.chapters:
+        wc += ch.word_count()
+    print("part #: %d" % part.number)
+    print("tag: %s" % part.tag)
+    print("title: %s" % part.title)
+    print("chapters: %d" % len(part.chapters))
+    print("%d words" % wc)
+
+def show_chapter(novel, chapter_tag):
+    chapter = novel.find_chapter(chapter_tag)
+    if chapter is None:
+        print("No chapter with tag %s" % chapter_tag)
+        sys.exit(1)
+    print("Chapter #: %d" % chapter.number)
+    print("Tag: %s" % chapter.tag)
+    if chapter.title:
+        print("Title: %s" % chapter.title)
+    print("Word Count: %s" % chapter.word_count())
+
+def show_version(novel):
     pass
 
-def show_chapters(novel):
-    pass
-
-def show_versions(novel):
-    pass
-
-def show_drafts(novel):
+def show_draft(novel):
     pass
 
 # add
@@ -327,37 +361,129 @@ def add_plotline(novel, tag, description):
         
     git_add_files_and_commit(message='add plotline %s' % tag)
 
-def add_part(novel, tag, title, before, after, parent):
-    # First check if the tags are valid:
-    part_tags = [p.tag for p in novel.parts]
-    for i in [before, after, parent]:
-        if i not in part_tags:
-            print("%s: invalid part tag" % i)
+def add_part(novel, tag, title, before_tag, after_tag, parent_tag):
+    # First check if the tags are valid
+    (before, after, parent) = (None, None, None)
+    if before_tag is not None:
+        before = novel.find_part(before_tag)
+        if before is None:
+            print("'%s': part not found for 'before'" % before_tag)
             sys.exit(1)
-                
+    if after_tag is not None:
+        after = novel.find_part(after_tag)
+        if after is None:
+            print("'%s': part not found for 'after'" % after_tag)
+            sys.exit(1)
+    if parent_tag is not None:
+        parent = novel.find_part(parent_tag)
+        if parent is None:
+            print("'%s': part not found for 'parent'" % parent_tag)
+            sys.exit(1)
+    
+    if novel.find_part(tag) is not None:
+        print("Tag '%s' already used.")
+        sys.exit(1)
+    
+    part = Part(tag, novel, title, parent)
     with open(PARTSFILE, 'a') as partsfile:
         partswriter = csv.writer(partsfile)
-        partswriter.writerow([tag, title, parent])
+        part.write_row(partswriter)
         partsfile.close()
     
-    git_add_files_and_commit(message='add part %s' % tag)
+    git_add_files_and_commit([PARTSFILE,], message='add part %s' % tag)
 
 def add_chapter(novel, plotline_tag, title, part_tag):
     
     plotline = novel.find_plotline(plotline_tag)
     if plotline is None:
         print("%s: plotline not found" % plotline_tag)
+        sys.exit(1)
     part = novel.find_part(part_tag)
     if part is None:
         print("%s: part not found" % part_tag)
+        sys.exit(1)
     
     i = len(novel.chapters)+1
-    c = Chapter(plotline=plotline, novel=novel, title=title, part=part, 
-        number=i)
+    c = Chapter(plotline=plotline, novel=novel, title=title, part=part, number=i)
     with open(CHAPTERSFILE, 'a') as chaptersfile:
-        ch_writer = csv.writer()
+        ch_writer = csv.writer(chaptersfile)
         c.write_row(ch_writer)
-        chatpersfile.close()
+        chaptersfile.close()
+    
+    if not os.path.exists(c.path):
+        open(c.path,'x').close()
+    
+    git_add_files_and_commit([c.path, CHAPTERSFILE], "Add chapter %s" % c)
+
+# update
+
+def update_part(novel, tag, title, before_tag, after_tag, parent_tag):
+    part = novel.find_part(tag)
+    if part is None:
+        print("%s: part not found" % tag)
+        sys.exit(1)
+        
+    if title:
+        part.title = title
+    
+    if parent_tag:
+        old_parent = part.parent
+        parent = novel.find_part(parent)
+        part.parent = parent
+        old_parent.children.remove(part)
+        parent.children.append(part)
+    
+    if before_tag:
+        before = novel.find_part(before_tag)
+        if before is None:
+            print("%s: part not found" % tag)
+            sys.exit(1)
+        i1 = novel.parts.index(part)
+        i2 = novel.parts.index(before)
+        novel.parts.insert(novel.parts.pop(i1), i2)
+        
+    if after_tag:
+        after = novel.find_part(after_tag)
+        if after is None:
+            print("%s: part not found" % tag)
+            sys.exit(1)
+        i1 = novel.parts.index(part)
+        i2 = novel.parts.index(before)+1
+        novel.parts.insert(novel.parts.pop(i1), i2)
+    
+    with open(PARTSFILE, 'w') as partsfile:
+        writer = csv.writer(partsfile)
+        for p in novel.parts:
+            p.write_row(writer)
+        partsfile.close()
+    
+    git_add_files_and_commit([PARTSFILE], "Update part %s" % part_tag)
+
+def update_plotline(novel, tag, new_tag, description):
+    plotline = novel.find_plotline(tag)
+    
+    if not plotline:
+        print("%s: plotline not found" % tag)
+        sys.exit(1)
+    
+    if new_tag:
+        plotline.tag = new_tag
+    
+    if description:
+        plotline.comment = description
+    
+    novel.write_plotlines()
+    
+    git_add_files_and_commit([PLOTLINESFILE], "Update plotline %s" % tag)
+
+def update_chapter(novel, tag, plotline_tag, part_tag, before_tag, after_tag):
+    pass
+
+def update_version(novel, tag, rename_tag, comment):
+    pass
+
+def update_draft(novel, tag, rename_tag, comment):
+    pass
 
 def edit_chapter(novel, cont, tag, editor):
     
@@ -415,25 +541,16 @@ def delete_chapter(novel, tag, force):
                 delete_chapter(novel, tag, True)
             else:
                 print("%s not deleted." % chapter)
-                return
+                sys.exit(0)
     
-    ch_entries = []
-    with open(CHAPTERSFILE) as chaptersfile:
-        ch_reader = csv.reader(chaptersfile)
-        chh_entries = [r for r in ch_reader]
-        chaptersfile.close()
+    os.remove(chapter.path)
+    novel.chapters.remove(chapter)
     
     with open(CHAPTERSFILE, 'w') as chaptersfile:
-        ch_writer = csv.writer(chaptersfile)
-        ch_writer.writerows(ch_entries[:chapter.num-1])
-        ch_writer.writerows(ch_entries[chapter.num+1:])
+        writer = csv.writer(chaptersfile)
+        for chapter in novel.chapters:
+            chapter.write_row(writer)
         chaptersfile.close()
-    
-    os.remove(chapter.path())
-    print("Removed %s" % chapter.path())
-    
-    git_add_files_and_commit([], message="Delete %s" % chapter)
-    
 
 def delete_version(novel, tag, force):
     pass
@@ -504,6 +621,29 @@ Use `mnadmin' to create the novel project. Thank you.")
             add_version(novel, parsed.tag)
         elif args.which == 'add_draft':
             add_draft(novel, parsed.tag)
+    
+    elif getattr(args, 'which', '').startswith('update_'):
+        parsed = parser_update.parse_args(argv[2:])
+        tag = getattr(parsed, 'tag', None)
+        new_tag = getattr(parsed, 'new_tag', None)
+        description = getattr(parsed, 'description', None)
+        title = getattr(parsed, 'title', None)
+        before = getattr(parsed, 'before', None)
+        parent = getattr(parsed, 'parent', None)
+        after = getattr(parsed, 'after', None)
+        plotline = getattr(parsed, 'plotline', None)
+        part = getattr(parsed, 'part', None)
+        
+        if args.which == 'update_plotline':
+            update_plotline(novel, tag, new_tag, description)
+        elif args.which == 'update_part':
+            update_part(novel, tag, title, before, after, parent)
+        elif args.which == 'update_chapter':
+            update_chapter(novel, plotline, title, part)
+        elif args.which == 'update_version':
+            update_version(novel, parsed.tag)
+        elif args.which == 'update_draft':
+            update_draft(novel, parsed.tag)
     
     elif getattr(args, 'which', '') == 'edit_chapter':
         parsed = parser_edit.parse_args(argv[2:])

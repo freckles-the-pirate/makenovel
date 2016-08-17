@@ -4,6 +4,20 @@ import os
 import sys
 import csv
 
+DATADIR = '.novel'
+NOVELFILE = os.path.join(DATADIR, 'novel')
+PARTSFILE = os.path.join(DATADIR, 'parts.csv')
+CHAPTERSFILE = os.path.join(DATADIR, 'chapters.csv')
+PLOTLINESFILE = os.path.join(DATADIR, 'plotlines.csv')
+VERSIONSFILE = os.path.join(DATADIR, 'versions.csv')
+DRAFTSFILE = os.path.join(DATADIR, 'drafts.csv')
+
+def machine_str(s):
+    s2 = s.lower().replace( ' ', '_' )
+    for i in ('!', '.', "'", '"', ','):
+        s2 = s2.replace(i, '')
+    return s2
+
 class Config(object):
     doc=None
     default_value=None
@@ -45,7 +59,7 @@ class NovelEnvironment(object):
     last_edit = None
     projdir = None
     
-    def __init__(self, last_edit=None, projdir = None):
+    def __init__(self, last_edit=None, projdir=None):
         self.last_edit = last_edit
         self.projdir = projdir
 
@@ -61,11 +75,11 @@ class Novel(object):
     drafts = []
     parts = []
     
-    def __init__(self, title, author=None, config={}, env=None):
+    def __init__(self, title=None, author=None, config={}, env=None):
         self.title = title
         self.author = author
         self.config = config
-        self.env = NovelEnvironment()
+        self.env = env
                 
     def get_config(self, key):
         if key in self.config:
@@ -94,6 +108,23 @@ class Novel(object):
             if p.tag == tag:
                 return p
         return None
+    
+    def _write_csv(self, obj_set, path):
+        p = os.path.join(self.env.projdir, path)
+        with open(path, 'w') as csv_file:
+            csv_writer = csv.writer(csv_file)
+            for obj in obj_set:
+                obj.write_row(csv_writer)
+            csv_file.close()
+    
+    def write_plotlines(self):
+        self._write_csv(self.plotlines, PLOTLINESFILE)
+    
+    def write_parts(self):
+        self._write_csv(self.parts, PARTSFILE)
+    
+    def write_chapters(self):
+        self._write_csv(self.chapters, CHAPTERSFILE)
     
     def __repr__(self):
         return "%s by %s" % (self.title, self.author)
@@ -142,50 +173,55 @@ class Plotline(Novelable, Commentable, Taggable):
             for row in pl_reader:
                 p = Plotline(row[0], novel, row[1])
                 novel.plotlines.append(p)
+    
+    def write_row(self, writer):
+        writer.writerow([self.tag, self.comment])
 
 class Part(Novelable, Taggable):
     
+    tag=None
+    novel=None
+    number=0
     title=None
     parent=None
     children=[]
     chapters=[]
     
-    def __init__(self, tag, novel, title, parent=None, children=[]):
+    def __init__(self, novel, title, number, tag=None, parent=None, children=[]):
         self.tag = tag
         self.novel = novel
         self.title = title
         self.parent = parent
         self.children = children
+        self.number = number
+        if self.tag is None or len(self.tag) == 0:
+            if self.title is None:
+                self.tag = '%d' % self.number
+            else:
+                self.tag = '%d__%s' % (self.number, machine_str(self.title))
         
     @classmethod
     def from_file(Klass, novel, path):
+        n=0
         with open(path) as partsfile:
             p_reader = csv.reader(partsfile)
             for row in p_reader:
-                tag = row[0]
-                title = row[1]
-                parent_tag = row[2]
+                (title, parent) = row
                 
-                parent = None
-                for p in novel.parts:
-                    if p.tag == parent_tag:
-                        parent = p
-                
-                part = Part(tag, novel, title, parent)
+                parent = novel.find_part(parent)
+                n += 1
+                part = Part(novel=novel, title=title, parent=parent, number=n)
                 if parent:
                     parent.children.append(part)
                 
                 novel.parts.append(part)
             partsfile.close()
     
-    def write_row(self, outpath):
-        with open(outpath) as partsfile:
-            partswriter = csv.writer(partsfile)
-            parent_tag = None
-            if self.parent:
-                parent_tag = self.parent.tag
-            partswriter.write_row([self.tag, self.title, self.parent_tag])
-            partsfile.close()
+    def write_row(self, writer):
+        parent_tag = None
+        if self.parent:
+            parent_tag = self.parent.tag
+        writer.writerow([self.tag, self.title, parent_tag])
 
 class Chapter(Taggable):
     
@@ -208,18 +244,14 @@ class Chapter(Taggable):
         self.path = path
         
         # Configure the chapter tag and path
-        if self.tag is None:
-            if title is None:
-                tag = '%d' % number
+        if self.tag is None or len(tag) == 0:
+            if title is None or len(title) == 0:
+                self.tag = '%d' % number
             else:
                 # Replace all machine-unfriendly chars.
-                ttl = title.lower(
-                    ).replace(
-                        ' ', '_'
-                    )
-                for i in ('!', '.', "'", '"', ','):
-                    ttl = ttl.replace(i, '')
-                tag = '%d__%s' % (number, ttl)
+                ttl = machine_str(title)
+                self.tag = '%d__%s' % (number, ttl)
+        #print("tag=%s" % self.tag)
                 
         if self.path is None:
             filename = '%s.%s' % (tag, novel.config.get('chapter.ext', 'rst'))
@@ -230,8 +262,9 @@ class Chapter(Taggable):
             self.path = os.path.join(pre, filename)
     
     def word_count(self):
-        with open(path) as f:
-            count = len(' '.split(f.read()))
+        count = 0
+        with open(self.path, 'r') as f:
+            count += len(f.read().split(' '))
             f.close()
         return count
     
@@ -240,18 +273,11 @@ class Chapter(Taggable):
             return "[%s] Chapter %d: %s" % (self.tag, self.number, self.title)
         return "[%s] Chapter %d" % (self.tag, self.number)
     
-    @property
-    def tag(self):
-        if self.title:
-            ttl = self.title.lower().replace(' ', '_').replace("'", '')
-            return '%d__%s' % (self.number, ttl)
-        return '%d' % self.number
-    
     def write_row(self, csvwriter):
-        csvwriter.write_row([self.tag,
+        csvwriter.writerow([self.tag,
                              self.path,
                              self.plotline.tag, 
-                             self.part,
+                             self.part.tag,
                              self.title,
                              ])
     
@@ -263,7 +289,7 @@ class Chapter(Taggable):
         with open(chapters_path) as chaptersfile:
             ch_reader = csv.reader(chaptersfile)
             for row in ch_reader:
-                (tag, path, plotline_tag, part_tag, title, part_tag) = row
+                (tag, path, plotline_tag, part_tag, title) = row
                 
                 part = None
                 if part_tag is not None:
