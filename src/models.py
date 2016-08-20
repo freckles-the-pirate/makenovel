@@ -3,6 +3,7 @@
 import os
 import sys
 import csv
+import shutil
 
 DATADIR = '.novel'
 NOVELFILE = os.path.join(DATADIR, 'novel')
@@ -70,20 +71,34 @@ class Novel(object):
     env = None
     
     plotlines = []
+    parts = []
     chapters = []
     versions = []
     drafts = []
-    parts = []
     
     def __init__(self, title=None, author=None, config={}, env=None):
         self.title = title
         self.author = author
         self.config = config
         self.env = env
+    
+    def add_plotlines(self, *plotlines):
+        for plotline in plotlines:
+            plotline.novel = self
+            self.plotlines.append(plotline)
+    
+    def add_parts(self, *parts):
+        for part in parts:
+            part.novel = self
+            self.parts.append(part)
+    
+    def set_config(self, key, value, create=False):
+        if create and key not in self.config:
+            self.config.update({key: Config("[user]", None)})
+        self.config[key].value = value
                 
     def get_config(self, key):
-        if key in self.config:
-            return DEFAULTS['key'].value
+        return self.config[key].value or self.config[key].default
     
     def word_count(self):
         count = 0
@@ -125,6 +140,27 @@ class Novel(object):
     
     def write_chapters(self):
         self._write_csv(self.chapters, CHAPTERSFILE)
+        
+    @classmethod
+    def parse(Klass, env):
+        novel_path = os.path.join(env.projdir, NOVELFILE)
+        chapt_path = os.path.join(env.projdir, CHAPTERSFILE)
+        parts_path = os.path.join(env.projdir, PARTSFILE)
+        plotline_path = os.path.join(env.projdir, PLOTLINESFILE)
+        versions_path = os.path.join(env.projdir, VERSIONSFILE)
+        draft_path = os.path.join(env.projdir, DRAFTSFILE)
+        
+        # Novel Overview
+        with open(novel_path) as novel_file:
+            for line in novel_file:
+                l = line.strip()
+                if not l.startswith('#'):
+                    cfg = line.split('=')
+        
+        novel = Novel(title, author, config, env)
+        
+        Part.from_file(novel, parts_path)
+        Plotline.from_file(novel, plotline_path)
     
     def __repr__(self):
         return "%s by %s" % (self.title, self.author)
@@ -150,17 +186,16 @@ class Commentable(object):
         self.comment = comment
 
 class Plotline(Novelable, Commentable, Taggable):
+    path = None
     
-    def __init__(self, tag, novel, comment=None):
-        self.tag = tag
+    def __init__(self, novel, tag, comment=None):
         self.novel = novel
+        self.tag = tag
         self.comment = comment
-        
-    def get_directory(self):
-        os.path.join(os.path.abspath('.'), self.tag)
+        os.path.join(self.novel.env.projdir, self.tag)
     
     def create_directory(self):
-        os.makedirs(self.get_directory())
+        os.makedirs(self.path)
     
     def __repr__(self):
         return "<Plotline (tag=\"%s\", novel=\"%s\", comment=\"%s\")>" % (
@@ -176,43 +211,53 @@ class Plotline(Novelable, Commentable, Taggable):
     
     def write_row(self, writer):
         writer.writerow([self.tag, self.comment])
+    
+    def _is_ch(self, x):
+        return x.plotline == self
+    
+    @property
+    def chapters(self):
+        return filter(self._is_ch, self.novel.chapters)
 
 class Part(Novelable, Taggable):
     
-    tag=None
     novel=None
-    number=0
     title=None
     parent=None
     children=[]
     chapters=[]
     
-    def __init__(self, novel, title, number, tag=None, parent=None, children=[]):
-        self.tag = tag
+    def __init__(self, novel, title=None, parent=None):
         self.novel = novel
         self.title = title
         self.parent = parent
-        self.children = children
-        self.number = number
-        if self.tag is None or len(self.tag) == 0:
-            if self.title is None:
-                self.tag = '%d' % self.number
-            else:
-                self.tag = '%d__%s' % (self.number, machine_str(self.title))
+        
+        if self.parent:
+            self.parent.children.append(self)
+    
+    @property
+    def number(self):
+        if self.parent:
+            return len(self.parent.children)+1
+        else:
+            return len(self.novel.parts)+1
+    
+    @property
+    def tag(self):
+        if self.title is None:
+            return '%d' % self.number
+        else:
+            return '%d__%s' % (self.number, machine_str(self.title))
         
     @classmethod
     def from_file(Klass, novel, path):
-        n=0
         with open(path) as partsfile:
             p_reader = csv.reader(partsfile)
             for row in p_reader:
-                (title, parent) = row
+                (tag, title, parent) = row
                 
                 parent = novel.find_part(parent)
-                n += 1
-                part = Part(novel=novel, title=title, parent=parent, number=n)
-                if parent:
-                    parent.children.append(part)
+                part = Part(novel, title, parent=parent)
                 
                 novel.parts.append(part)
             partsfile.close()
@@ -243,23 +288,36 @@ class Chapter(Taggable):
         self.number = number
         self.path = path
         
-        # Configure the chapter tag and path
-        if self.tag is None or len(tag) == 0:
-            if title is None or len(title) == 0:
-                self.tag = '%d' % number
-            else:
-                # Replace all machine-unfriendly chars.
-                ttl = machine_str(title)
-                self.tag = '%d__%s' % (number, ttl)
-        #print("tag=%s" % self.tag)
+        if self.number==0:
+            self.number = len(novel.chapters)+1
+        
+        if self.tag is None or len(self.tag) == 0:
+            self.reset_tag_and_path()
+    
+    def reset_tag_and_path(self):
+        old_tag = self.tag
+        old_path = self.path
+        
+        if self.title is None or len(self.title) == 0:
+            self.tag = '%d' % self.number
+        else:
+            # Replace all machine-unfriendly chars.
+            ttl = machine_str(self.title)
+            self.tag = '%d__%s' % (self.number, ttl)
                 
-        if self.path is None:
-            filename = '%s.%s' % (tag, novel.config.get('chapter.ext', 'rst'))
-            if plotline is not None:
-                pre = os.path.join(novel.env.projdir, plotline.tag)
+        if self.path is None or old_tag != self.tag:
+            filename = '%s.%s' % (self.tag,
+                                  self.novel.config.get(
+                                      'chapter.ext', 'rst'))
+            if self.plotline is not None:
+                pre = os.path.join(self.novel.env.projdir, self.plotline.tag)
             else:
-                pre = os.path.join(novel.env.projdir)
+                pre = os.path.join(self.novel.env.projdir)
             self.path = os.path.join(pre, filename)
+        
+        if self.path != old_path and None not in (self.path, old_path):
+            shutil.copy(old_path, self.path)
+            print("[shell] cp %s %s" % (old_path, self.path))
     
     def word_count(self):
         count = 0

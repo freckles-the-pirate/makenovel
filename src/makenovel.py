@@ -61,7 +61,8 @@ parser_add_plotline.set_defaults(which='add_plotline')
 
 ### "Add parts" subparser ###
 parser_add_part = subparsers_add.add_parser('part')
-parser_add_part.add_argument('title', help="Formal title, e.g. 'Part 1'")
+parser_add_part.add_argument('-t', '--title',
+                             help="Formal title, e.g. 'Part 1'")
 part_order = parser_add_part.add_mutually_exclusive_group()
 part_order.add_argument('-b', '--before',
     metavar='PART_TAG',
@@ -193,6 +194,33 @@ parser_bind.add_argument('-d', '--draft',
     help="Tag of the draft to use. If omitted, latest draft will be used.")
 parser_bind.set_defaults(which='bind')
 
+### "import" subparser
+parser_import = subparsers.add_parser("import")
+
+### IMPORT CHAPTER
+subparsers_import = parser_import.add_subparsers()
+parser_import_chapter = subparsers_import.add_parser('chapter')
+parser_import_chapter.add_argument("-o", "--path",
+                                   help="Path of the original chapter file.",
+                                   required=True)
+parser_import_chapter.add_argument("-P", "--plotline",
+                                   help="Plotline tag",
+                                   required=True)
+parser_import_chapter.add_argument("-t", "--title",
+                                   help="Title of the chapter"
+                                   )
+parser_import_chapter.add_argument("-p", "--part",
+                                   help="Add the chapter to this part tag"
+                                   )
+parser_import_chapter.set_defaults(which='import_chapter')
+chapter_import_order = parser_import_chapter.add_mutually_exclusive_group()
+chapter_import_order.add_argument('-b', '--before', nargs=1,
+    metavar='CHAPTER',
+    help='update this chapter before `CHAPTER`')
+chapter_import_order.add_argument('-a', '--after', nargs=1,
+    metavar='CHAPTER',
+    help='update this chapter after `CHAPTER`')
+
 def get_novel(config={}):
     
     if not os.path.exists(DATADIR):
@@ -260,11 +288,11 @@ def list_parts(novel):
     print("%5s%10s%10s%5s" % (" ", "tag", " ", "title"))
     print("%s+%s" % ("=" * 20, "=" * 20))
     for part in novel.parts:
-        print("%10s%20s" % (part.tag, part.title))
+        print("%10s%20s" % (part.tag, part.title or ''))
 
 def _print_tree_parts(part, level=0):
     sys.stdout.write('  '*level)
-    sys.stdout.write('+- [%s] %s\n' % (part.tag, part.title))
+    sys.stdout.write('+- [%s] %s\n' % (part.tag, part.title or ''))
     if part.chapters and len(part.chapters) > 0:
         for chapter in part.chapters:
             sys.stdout.write('  '*(level+1))
@@ -306,8 +334,8 @@ def show_novel(novel):
 def show_part(novel, part_tag):
     part = novel.find_part(part_tag)
     if part is None:
-        print("%s: Part not found" % part_tag)
-        sys.exit(1)
+        tags = ', '.join(["'%s'" % p.tag for p in novel.parts])
+        raise RuntimeError("%s: Part not found in [%s]" % (part_tag, tags))
     wc = 0
     for ch in part.chapters:
         wc += ch.word_count()
@@ -316,6 +344,15 @@ def show_part(novel, part_tag):
     print("title: %s" % part.title)
     print("chapters: %d" % len(part.chapters))
     print("%d words" % wc)
+
+def show_plotline(novel, plotline_tag):
+    plotline = novel.find_plotline(plotline_tag)
+    if not plotline:
+        print("%s: plotline not found" % plotline_tag)
+    
+    print("tag: %s" % plotline.tag)
+    print("description: %s" % plotline.comment)
+    print("%d chapters follow this plotline" % len(plotline.chapters))
 
 def show_chapter(novel, chapter_tag):
     chapter = novel.find_chapter(chapter_tag)
@@ -337,6 +374,9 @@ def show_draft(novel):
 # add
 
 def git_add_files_and_commit(paths=[], message=None):
+    for i in paths:
+        if not os.path.exists(i):
+            raise RuntimeError("%s: path not found\n" % i)
     if isinstance(paths, list) or isinstance(paths, tuple):
         paths = ' '.join(paths)
     if paths and len(paths) > 0:
@@ -351,17 +391,14 @@ def git_add_files_and_commit(paths=[], message=None):
     return subprocess.call(CMD)
 
 def add_plotline(novel, tag, description):
-    plotline_dir = os.path.join(PROJDIR, tag)
-    if not os.path.exists(plotline_dir):
-        os.makedirs(plotline_dir)
-    with open(PLOTLINESFILE, 'a') as plf:
-        wr = csv.writer(plf)
-        wr.writerow([tag, description])
-        plf.close()
-        
-    git_add_files_and_commit(message='add plotline %s' % tag)
+    if novel.find_plotline(tag) is not None:
+        sys.stderr.write("%s: plotline tag already exists\n" % tag)
+        sys.exit(1)
+    novel.add_plotlines(Plotline(novel, tag, description))
+    novel.write_plotlines()
+    git_add_files_and_commit([PLOTLINESFILE], message='add plotline %s' % tag)
 
-def add_part(novel, tag, title, before_tag, after_tag, parent_tag):
+def add_part(novel, title=None, before_tag=None, after_tag=None, parent_tag=None):
     # First check if the tags are valid
     (before, after, parent) = (None, None, None)
     if before_tag is not None:
@@ -380,17 +417,17 @@ def add_part(novel, tag, title, before_tag, after_tag, parent_tag):
             print("'%s': part not found for 'parent'" % parent_tag)
             sys.exit(1)
     
-    if novel.find_part(tag) is not None:
-        print("Tag '%s' already used.")
-        sys.exit(1)
+    part = Part(novel, title, parent)
     
-    part = Part(tag, novel, title, parent)
-    with open(PARTSFILE, 'a') as partsfile:
-        partswriter = csv.writer(partsfile)
-        part.write_row(partswriter)
-        partsfile.close()
+    if before:
+        novel.parts.insert(novel.parts.index(before), part)
+    elif after:
+        novel.parts.insert(novel.parts.index(after)+1, part)
     
-    git_add_files_and_commit([PARTSFILE,], message='add part %s' % tag)
+    novel.parts.append(part)
+    
+    novel.write_parts()
+    git_add_files_and_commit([PARTSFILE,], message='add part %s' % part.tag)
 
 def add_chapter(novel, plotline_tag, title, part_tag):
     
@@ -413,7 +450,7 @@ def add_chapter(novel, plotline_tag, title, part_tag):
     if not os.path.exists(c.path):
         open(c.path,'x').close()
     
-    git_add_files_and_commit([c.path, CHAPTERSFILE], "Add chapter %s" % c)
+    git_add_files_and_commit([c.path, CHAPTERSFILE,], "Add chapter %s" % c)
 
 # update
 
@@ -457,7 +494,7 @@ def update_part(novel, tag, title, before_tag, after_tag, parent_tag):
             p.write_row(writer)
         partsfile.close()
     
-    git_add_files_and_commit([PARTSFILE], "Update part %s" % part_tag)
+    git_add_files_and_commit([PARTSFILE,], "Update part %s" % part_tag)
 
 def update_plotline(novel, tag, new_tag, description):
     plotline = novel.find_plotline(tag)
@@ -474,10 +511,70 @@ def update_plotline(novel, tag, new_tag, description):
     
     novel.write_plotlines()
     
-    git_add_files_and_commit([PLOTLINESFILE], "Update plotline %s" % tag)
+    git_add_files_and_commit([PLOTLINESFILE,], "Update plotline %s" % tag)
 
 def update_chapter(novel, tag, plotline_tag, part_tag, before_tag, after_tag):
-    pass
+    (plotline, part, before, after) = (None, )*4
+    
+    chapter = novel.find_chapter(tag)
+    if chapter is None:
+        print("%s: chapter not found" % tag)
+        sys.exit(1)
+    
+    # The tag will be overwritten, so save it, just in case.
+    old_tag = chapter.tag
+    
+    if plotline_tag:
+        plotline = novel.find_plotline(plotline_tag)
+        if plotline is None:
+            print("%s: plotline not found" % plotline_tag)
+            sys.exit(1)
+        old_plotline = chapter.plotline
+        chapter.plotline = plotline
+        plotline.chapters.append(
+            old_plotline.pop(
+                old_plotline.index(chapter)
+            )
+        )
+    
+    if part_tag:
+        part = novel.find_part(part_tag)
+        if part is None:
+            print("%s: part not found" % part_tag)
+            sys.exit(1)
+        old_part = chapter.part
+        chapter.part = part
+        part.chapters.append(
+            old_part.pop(
+                old_part.index(chapter)
+            )
+        )
+    
+    if before_tag:
+        before = novel.find_chapter(before_tag)
+        if before is None:
+            print("%s: chapter not found" % before)
+            sys.exit(1)
+        
+        novel.chapters.insert(
+            novel.chapters.index(chapter),
+            novel.chapters.pop(chapter)
+            )
+    
+    elif after_tag:
+        after = novel.find_chapter(after_tag)
+        if after is None:
+            print("%s: chapter not found" % after)
+            sys.exit(1)
+        
+        novel.chapters.insert(
+            novel.chapters.index(chapter)+1,
+            novel.chapters.pop(chapter)
+            )
+        
+    chapter.reset_tag_and_path()
+    
+        
 
 def update_version(novel, tag, rename_tag, comment):
     pass
@@ -514,7 +611,7 @@ def edit_chapter(novel, cont, tag, editor):
     print("[shell] %s" % ' '.join(CMD))
     subprocess.call(CMD)
     
-    git_add_files_and_commit(chapter.path, "Edit %s" % chapter)
+    git_add_files_and_commit([chapter.path,], "Edit %s" % chapter)
 
 ## Delete methods ##
 
@@ -558,10 +655,63 @@ def delete_version(novel, tag, force):
 def delete_draft(novel, tag, force):
     pass
 
+def import_chapter(novel, origin, plotline_tag, title, part_tag, before_tag, 
+                    after_tag):
+    
+    if plotline_tag:
+        plotline = novel.find_plotline(plotline_tag)
+        if not plotline:
+            print("%s: plotline not found" % plotline_tag)
+            sys.exit(1)
+    
+    if part_tag:
+        part = novel.find_part(part_tag)
+        if not part:
+            print("%s: part not found" % part_tag)
+            sys.exit(1)
+    
+    if before_tag:
+        before = novel.find_before(before_tag)
+        if not before:
+            print("%s: chapter not found" % before_tag)
+            sys.exit(1)
+    
+    elif after_tag:
+        after = novel.find_after(after_tag)
+        if not after:
+            print("%s: chapter not found" % after_tag)
+            sys.exit(1)
+    
+    if not os.path.exists(origin):
+        print("%s: Origin path does not exist." % origin)
+        sys.exit(1)
+        
+    chapter = Chapter(plotline, novel, title, part)
+    if not os.path.exists(chapter.path):
+        open(chapter.path, 'x').close()
+    
+    with open(origin, 'r') as originfile:
+        with open(chapter.path, 'w') as destfile:
+            destfile.write(originfile.read())
+        destfile.close()
+        originfile.close()
+    
+    plotline_dir = None
+    if chapter.plotline:
+        plotline_dir = chapter.plotline.path
+    
+    files = [CHAPTERSFILE, chapter.path, plotline_dir]
+    print("Commiting: %s" % (", ".join(files)))
+    git_add_files_and_commit(files, "Import %s" % chapter)
+
 def main(argv):
     if not os.path.exists(DATADIR):
         print("This is not a makenovel project. \
 Use `mnadmin' to create the novel project. Thank you.")
+        sys.exit(1)
+    
+    if len(argv) == 1:
+        parser.print_help()
         sys.exit(1)
         
     args = parser.parse_args(argv[1:])
@@ -600,7 +750,7 @@ Use `mnadmin' to create the novel project. Thank you.")
         elif obj == 'draft':
             show_draft(novel, tag)
     
-    elif getattr(args, 'which', '').startswith('add_'):
+    elif getattr(args, 'which', '').startswith('add'):
         parsed = parser_add.parse_args(argv[2:])
         tag = getattr(parsed, 'tag', None)
         description = getattr(parsed, 'description', None)
@@ -614,7 +764,7 @@ Use `mnadmin' to create the novel project. Thank you.")
         if args.which == 'add_plotline':
             add_plotline(novel, tag, description)
         elif args.which == 'add_part':
-            add_part(novel, tag, title, parent, before, after)
+            add_part(novel, title, before, after, parent)
         elif args.which == 'add_chapter':
             add_chapter(novel, plotline, title, part)
         elif args.which == 'add_version':
@@ -669,7 +819,18 @@ Use `mnadmin' to create the novel project. Thank you.")
         }
         
         callbacks[obj](novel, tag, force)
+    
+    elif getattr(args, 'which', '').startswith('import'):
+        parsed = parser_import.parse_args(argv[2:])
+        origin = getattr(parsed, 'path', None)
+        plotline = getattr(parsed, 'plotline', None)
+        title = getattr(parsed, 'title', None)
+        part = getattr(parsed, 'part', None)
+        before = getattr(parsed, 'before', None)
+        after = getattr(parsed, 'after', None)
         
+        if args.which == 'import_chapter':
+            import_chapter(novel, origin, plotline, title, part, before, after)
 
 if __name__=="__main__":
     main(sys.argv)

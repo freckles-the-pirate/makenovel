@@ -33,14 +33,18 @@ parser.add_argument("-p", "--path",
 parser.add_argument("-b", "--branch",
     help="Name of this specific git branch")
 
-def create_project(name, title, branch):
-    projdir=os.path.join(CURRDIR, name)
+def create_project(name, title, branch=None, path=None, config=None):
+    projdir = path
+    if path is None:
+        projdir=os.path.join(CURRDIR, name)
     dest_data_dir=os.path.join(projdir, '.novel')
     if not os.path.exists(dest_data_dir):
         os.makedirs(dest_data_dir)
+        
+    sys.stderr.write("Creating project in %s\n" % dest_data_dir)
     
-    for f in ("novel", "chapters.csv", "parts.csv", "plotlines.csv", "versions.csv",
-        "drafts.csv"):
+    for f in ("novel", "chapters.csv", "parts.csv", 
+              "plotlines.csv","versions.csv", "drafts.csv"):
             tf = os.path.join(dest_data_dir, f)
             if not os.path.exists(tf):
                 os.close(os.open(tf, os.O_CREAT))
@@ -66,7 +70,8 @@ def create_project(name, title, branch):
     
 def main():
     args = parser.parse_args(sys.argv[1:])
-    create_project(args.name, args.title, args.branch)
+    create_project(args.name, args.title, args.branch, path=args.path,
+                   config=args.config)
 
 if __name__=="__main__":
     main()
