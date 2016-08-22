@@ -5,6 +5,8 @@ import os
 import argparse
 import csv
 import subprocess
+import textwrap
+
 from models import *
 
 PROJDIR = os.path.abspath('.')
@@ -25,10 +27,16 @@ TAG_HELP="Simple (machine-readable) name."
 
 parser = argparse.ArgumentParser(description=
                                  'Command line novel management')
-                                 
-""" Add a subparser
-"""
+
 subparsers = parser.add_subparsers()
+
+parser_config = subparsers.add_parser('config')
+parser_config.add_argument('-l', '--list', const=True, nargs='?')
+parser_config.add_argument('-k', '--key')
+parser_config.add_argument('-s', '--set')
+parser_config.add_argument('-g', '--get', const=True, nargs='?')
+parser_config.add_argument('-d', '--set-default', action='store_true')
+parser_config.set_defaults(which='config')
 
 parser_list = subparsers.add_parser('list')
 parser_list.add_argument('object', choices=[
@@ -220,59 +228,6 @@ chapter_import_order.add_argument('-b', '--before', nargs=1,
 chapter_import_order.add_argument('-a', '--after', nargs=1,
     metavar='CHAPTER',
     help='update this chapter after `CHAPTER`')
-
-def get_novel(config={}):
-    
-    if not os.path.exists(DATADIR):
-        print("Directory %s does not exist. Creating..." % DATADIR)
-        os.makedirs(DATADIR)
-    for datafile in [NOVELFILE, PARTSFILE, CHAPTERSFILE, PLOTLINESFILE,
-        VERSIONSFILE, DRAFTSFILE]:
-            if not os.path.exists(datafile):
-                print("    creating %s" % datafile)
-                open(datafile).close()
-    
-    env = NovelEnvironment(projdir=PROJDIR)
-    novel = Novel(env=env)
-    
-    with open(NOVELFILE) as novelfile:
-        lines = novelfile.readlines()
-        novelfile.close()
-    
-    data = {}
-    for line in lines:
-        if (line[0] != '#'):
-            l = line.strip().split('=')
-            data.update({l[0]: l[1]})
-    
-    title = data.get('title')
-    author = Author(config.get('first_name'),
-        config.get('last_name'),
-        config.get('middle_name'),
-        config.get('email_address'),
-        config.get('phone_number'),
-        config.get('street_address'),
-        config.get('city'),
-        config.get('state'))
-    
-    novel.title = title
-    novel.author = author
-    novel.config = config
-    chapters=[]
-    plotlines=[]
-    
-    Plotline.from_file(novel, PLOTLINESFILE)
-    Part.from_file(novel, PARTSFILE)
-    Chapter.from_file(novel, CHAPTERSFILE)
-    
-    # Parse the versions
-    
-    with open(VERSIONSFILE) as versionsfile:
-        v_reader = csv.reader(versionsfile)
-        for row in v_reader:
-            versions.append(Version(row[0], row[1], row[2], novel, row[3]))
-    
-    return novel
 
 # list
 
@@ -716,9 +671,51 @@ Use `mnadmin' to create the novel project. Thank you.")
         
     args = parser.parse_args(argv[1:])
     
-    novel = get_novel()
+    env = NovelEnvironment(projdir=PROJDIR)
+    novel = Novel.parse(env)
     
-    if getattr(args, 'which', '') == 'list':
+    if getattr(args, 'which', '') == 'config':
+        parsed = parser_config.parse_args(argv[2:])
+        sett = getattr(parsed, 'set', None)
+        get = getattr(parsed, 'get', None)
+        dflt = getattr(parsed, 'default', False)
+        key = getattr(parsed, 'key', None)
+        lst = getattr(parsed, 'list', False)
+        
+        if key is not None and key not in novel.config:
+            raise ValueError("'%s' not in %s" % (key, list(novel.config.keys())))
+        
+        if lst:
+            for c in novel.config.keys():
+                print(c)
+        elif sett:
+            novel.set_config(key, sett)
+            novel.write_config()
+        elif dflt:
+            dflt = novel.config[parsed.key].default
+            print(novel.set_config(parsed.key, dflt))
+        elif get or key:
+            print(novel.get_config(key))
+        else:
+            for k in list(novel.config.keys()):
+                dv = novel.config[k].default_value
+                cv = getattr(novel.config[k], 'value', None)
+                doc = textwrap.indent(
+                        '\n'.join(
+                            textwrap.wrap(
+                                "%s" % novel.config[k].doc,
+                            )
+                        ), '  | '
+                    )
+                print("* %s" % k)
+                print(doc)
+                if dv:
+                    print("    Default Value: %s" % str(dv))
+                if cv and dv != cv:
+                    print("    Current value: %s" % str(cv))
+                print()
+    
+    elif getattr(args, 'which', '') == 'list':
         obj = parser_list.parse_args(argv[2:]).object
         if obj == 'plotlines':
             list_plotlines(novel)        

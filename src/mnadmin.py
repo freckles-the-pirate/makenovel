@@ -6,6 +6,8 @@ import os
 import subprocess
 import shutil
 
+from makenovel import git_add_files_and_commit
+
 DFLT_CONFIG_FILE=os.path.abspath(
     os.path.expanduser('~/.makenovel/config'))
 CURRDIR = os.path.abspath('.')
@@ -41,16 +43,18 @@ def create_project(name, title, branch=None, path=None, config=None):
     if not os.path.exists(dest_data_dir):
         os.makedirs(dest_data_dir)
         
-    sys.stderr.write("Creating project in %s\n" % dest_data_dir)
+    print("Creating project in %s\n" % dest_data_dir)
     
     for f in ("novel", "chapters.csv", "parts.csv", 
               "plotlines.csv","versions.csv", "drafts.csv"):
             tf = os.path.join(dest_data_dir, f)
             if not os.path.exists(tf):
-                os.close(os.open(tf, os.O_CREAT))
+                open(tf,'w').close()
     
     with open(os.path.join(dest_data_dir, "novel"), 'w') as nf:
         nf.write('title=%s' % title)
+        if config:
+            nf.write('config=%s' % config)
         nf.close()
         
     currdir = os.path.abspath('.')

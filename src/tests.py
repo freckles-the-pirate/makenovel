@@ -67,6 +67,11 @@ class TestNovel(unittest.TestCase):
     
     def testAddPlotline(self):
         self.assertEqual(len(self.novel.plotlines), 2)
+        print("PLF!!!!")
+        with open(PLOTLINESFILE) as plf:
+            for l in plf:
+                print("|%s" % l)
+            plf.close()
         add_plotline(self.novel, "minor", "Minor plotline")
         self.assertEqual(len(self.novel.plotlines), 3)
     
@@ -79,6 +84,9 @@ class TestNovel(unittest.TestCase):
     
     def tearDown(self):
         shutil.rmtree(self.proj_path)
+        self.novel = None
+        self.env = None
+        self.proj_path = None
 
 
 if __name__=='__main__':

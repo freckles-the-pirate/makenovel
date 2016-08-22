@@ -23,10 +23,18 @@ class Config(object):
     doc=None
     default_value=None
     value=None
+    thetype=None
     
-    def __init__(self, doc=None, default_value=None):
+    def __init__(self, doc=None, default_value=None, thetype=str):
         self.doc = doc
         self.default_value = default_value
+        self.thetype=thetype
+    
+    def get_value(self):
+        v = self.default_value
+        if self.value:
+            v = self.value
+        return self.thetype(v)
 
 class Author(object):
     first_name=None
@@ -59,10 +67,12 @@ class NovelEnvironment(object):
     
     last_edit = None
     projdir = None
+    config_path = None
     
-    def __init__(self, last_edit=None, projdir=None):
+    def __init__(self, last_edit=None, projdir=None, config_path=None):
         self.last_edit = last_edit
         self.projdir = projdir
+        self.config_path = config_path
 
 class Novel(object):
     title = None
@@ -98,7 +108,14 @@ class Novel(object):
         self.config[key].value = value
                 
     def get_config(self, key):
-        return self.config[key].value or self.config[key].default
+        if key is None:
+            raise ValueError("%s not found in %s" % (
+                key, list(self.config.keys())))
+        c = self.config[key]
+        v = c.value or c.default_value
+        if v is None:
+            return v
+        return c.thetype(v)
     
     def word_count(self):
         count = 0
@@ -132,14 +149,38 @@ class Novel(object):
                 obj.write_row(csv_writer)
             csv_file.close()
     
+    def _get_data_path(self, p):
+        return os.path.join(self.env.projdir, p)
+    
     def write_plotlines(self):
-        self._write_csv(self.plotlines, PLOTLINESFILE)
+        self._write_csv(self.plotlines, self._get_data_path(PLOTLINESFILE))
     
     def write_parts(self):
-        self._write_csv(self.parts, PARTSFILE)
+        self._write_csv(self.parts, self._get_data_path(PARTSFILE))
     
     def write_chapters(self):
-        self._write_csv(self.chapters, CHAPTERSFILE)
+        self._write_csv(self.chapters, self._get_data_path(CHAPTERSFILE))
+    
+    def write_config(self):
+        with open(self.env.config_path, 'w') as config_file:
+            for (k, v) in self.config.items():
+                config_file.write('%s=%s\n' % (k, v.get_value()))
+            config_file.close()
+    
+    @classmethod
+    def loadConfigRef(Klass):
+        configs = {}
+        config_ref = os.path.join(
+            os.path.abspath(
+                os.path.dirname(__file__)),
+            'config.csv')
+        with open(config_ref) as configsfile:
+            reader = csv.reader(configsfile)
+            for row in reader:
+                c = Config(row[1], row[2])
+                configs.update({row[0]: c,})
+            configsfile.close()
+        return configs
         
     @classmethod
     def parse(Klass, env):
@@ -151,16 +192,57 @@ class Novel(object):
         draft_path = os.path.join(env.projdir, DRAFTSFILE)
         
         # Novel Overview
+        novel_properties = {}
         with open(novel_path) as novel_file:
             for line in novel_file:
                 l = line.strip()
-                if not l.startswith('#'):
-                    cfg = line.split('=')
+                if not l.startswith('#') and len(l) > 1:
+                    x = l.split('=')
+                    novel_properties.update({x[0]: x[1],})
+        
+        title = novel_properties['title']
+        config_path = novel_properties['config']
+        
+        if config_path == '':
+            config_path = None
+        
+        config = Klass.loadConfigRef()
+        
+        if config_path is None:
+            config_dir = os.path.expanduser( '~/.makenovel')
+            config_path = os.path.join(config_dir, 'makenovel.cfg')
+            if not os.path.exists(config_dir):
+                os.makedirs(config_dir)
+            if not os.path.exists(config_path):
+                with open(config_path, 'w') as cfg_file:
+                    for (k,v) in config.items():
+                        cfg_file.write('%s=%s\n' % (k, v.get_value()))
+                    cfg_file.close()
+        
+        env.projdir = os.path.abspath(
+            os.path.dirname('.')
+            )
+        env.config_path = config_path
+        
+        if config_path:
+            with open(config_path) as config_file:
+                for line in config_file:
+                    line = line.strip('\n')
+                    if not line.startswith('#'):
+                        x = line.split('=')
+                        if x[0] in config:
+                            config[x[0]].value = x[1]
+                config_file.close()
+        
+        author = Author(config['author.first_name'],
+                        config['author.last_name'])
         
         novel = Novel(title, author, config, env)
         
         Part.from_file(novel, parts_path)
         Plotline.from_file(novel, plotline_path)
+        
+        return novel
     
     def __repr__(self):
         return "%s by %s" % (self.title, self.author)
@@ -206,7 +288,7 @@ class Plotline(Novelable, Commentable, Taggable):
         with open(path) as plf:
             pl_reader = csv.reader(plf)
             for row in pl_reader:
-                p = Plotline(row[0], novel, row[1])
+                p = Plotline(novel, row[0], row[1])
                 novel.plotlines.append(p)
     
     def write_row(self, writer):
@@ -254,7 +336,7 @@ class Part(Novelable, Taggable):
         with open(path) as partsfile:
             p_reader = csv.reader(partsfile)
             for row in p_reader:
-                (tag, title, parent) = row
+                (title, parent) = row
                 
                 parent = novel.find_part(parent)
                 part = Part(novel, title, parent=parent)
