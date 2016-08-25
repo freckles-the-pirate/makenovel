@@ -30,7 +30,7 @@ class TestNovel(unittest.TestCase):
         
         self.proj_path = os.path.join(TestNovel.CURRDIR, "testnovel")
         
-        config = Novel.getUserConfig()
+        config = Config.get_ref()
             
         create_project("testnovel", "Test Novel", "ancient")
         
@@ -45,9 +45,10 @@ class TestNovel(unittest.TestCase):
                                  Plotline(self.novel, "side", "Side plot"),]
         self.novel.write_parts()
         self.novel.write_plotlines()
-        self.novel.git_commit_data(Novel.PLOTLINESFILE,
+        self.novel.git_commit_data(self.novel.env.plotlines_path,
                                    message="Add test plotlines")
-        self.novel.git_commit_data(Novel.PARTSFILE, message='add test parts')
+        self.novel.git_commit_data(self.novel.env.parts_path,
+                                   message='add test parts')
         
         super(TestNovel, self).__init__(methodName)
     
@@ -70,9 +71,9 @@ class TestNovel(unittest.TestCase):
         show_plotline(self.novel, "main")
     
     def testAddPlotline(self):
+        self.setUp()
         self.assertEqual(len(self.novel.plotlines), 2)
-        pth = os.path.join(self.proj_path, Novel.PLOTLINESFILE)
-        with open(pth) as plf:
+        with open(self.novel.env.plotlines_path) as plf:
             for l in plf:
                 print("|%s" % l)
             plf.close()
@@ -87,9 +88,8 @@ class TestNovel(unittest.TestCase):
             self.assertEqual(self.novel.parts[i].number, i+1)
     
     def tearDown(self):
-        if self.proj_path and os.path.exists(self.proj_path):
-            print("Removing %s" % self.proj_path)
-            shutil.rmtree(self.proj_path)
+        #if os.path.exists(self.proj_path):
+            #shutil.rmtree(self.proj_path)
         self.novel = None
         self.env = None
         self.proj_path = None

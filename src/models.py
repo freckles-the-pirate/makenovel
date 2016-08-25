@@ -11,6 +11,24 @@ def machine_str(s):
         s2 = s2.replace(i, '')
     return s2
 
+def parse_cfg(path):
+    cfg = {}
+    with open(path, 'r') as cfg_file:
+        for line in cfg_file:
+            if not line[0] != '#':
+                (x,y) = line.strip().split('=')
+                cfg.update({x: y,})
+        cfg_file.close()
+    return cfg
+
+def load_csv(path, mode='r'):
+    rows = []
+    with open(path, mode) as csvfile:
+        reader = csv.reader(csvfile)
+        rows = [r for r in reader]
+        csvfile.close()
+    return rows
+
 class Config(object):
     doc=None
     default_value=None
@@ -27,6 +45,43 @@ class Config(object):
         if self.value:
             v = self.value
         return self.thetype(v)
+    
+    @classmethod
+    def get_ref(Klass):
+        configs = {}
+        config_ref = os.path.join(
+            os.path.abspath(
+                os.path.dirname(__file__)),
+            'config.csv')
+        with open(config_ref) as configsfile:
+            reader = csv.reader(configsfile)
+            for row in reader:
+                c = Klass(row[1], row[2])
+                configs.update({row[0]: c,})
+            configsfile.close()
+        return configs
+    
+    
+    @classmethod
+    def get_user(Klass, config_path=None):
+        
+        if config_path == '':
+            config_path = None
+        
+        config = Klass.get_ref()
+        
+        if config_path is None:
+            config_dir = os.path.expanduser( '~/.makenovel')
+            config_path = os.path.join(config_dir, 'makenovel.cfg')
+            if not os.path.exists(config_dir):
+                os.makedirs(config_dir)
+            if not os.path.exists(config_path):
+                print("[makenovel] creating config file '%s'" % config_path)
+                with open(config_path, 'w') as cfg_file:
+                    for (k,v) in config.items():
+                        cfg_file.write('%s=%s\n' % (k, v.get_value()))
+                    cfg_file.close()
+        return config
 
 class Author(object):
     first_name=None
@@ -53,18 +108,73 @@ class Author(object):
     
     def __repr__(self):
         return "%s %s" % (self.first_name, self.last_name)
+    
+    @classmethod
+    def from_config(Klass, config):
+        return Author(
+            config.get('author.first_name'),
+            config.get('author.last_name'),
+            config.get('author.middle_name'),
+            config.get('author.email_address'),
+            config.get('author.phone_number'),
+            config.get('author.street_address'),
+            config.get('author.city'),
+            config.get('author.state')
+            )
 
 
 class NovelEnvironment(object):
     
     last_edit = None
-    projdir = None
-    config_path = None
     
-    def __init__(self, last_edit=None, projdir=None, config_path=None):
+    proj_path = None
+    
+    # data paths
+    data_dir = None
+    novel_path = None
+    parts_path = None
+    plotlines_path = None
+    chapters_path = None
+    versions_path = None
+    drafts_path = None
+    
+    config_path = None
+    title = None
+    
+    def __init__(self, projdir=None, config_path=None, last_edit=None, title=None):
         self.last_edit = last_edit
-        self.projdir = projdir
+        self.proj_path = projdir
         self.config_path = config_path
+        
+        self._datafiles = [self.parts_path, self.plotlines_path,
+                           self.chapters_path, self.versions_path,
+                           self.drafts_path]
+        dataparts = ('parts', 'plotlines', 'chapters', 'versions', 'drafts')
+        
+        self.data_dir = os.path.join(self.proj_path, '.novel')
+        
+        self.novel_path = os.path.join(self.data_dir, 'novel')
+        self.parts_path = os.path.join(self.data_dir, 'parts.csv')
+        self.plotlines_path = os.path.join(self.data_dir, 'plotlines.csv')
+        self.chapters_path = os.path.join(self.data_dir, 'chapters.csv')
+        self.versions_path = os.path.join(self.data_dir, 'versions.csv')
+        self.drafts_path = os.path.join(self.data_dir, 'drafts.csv')
+        
+        self.title = title
+    
+    @classmethod
+    def load(Klass, path=None):
+        if not path:
+            path = os.path.dirname('.')
+        cfg_path = os.path.join(path, '.novel', 'novel')
+        if not os.path.exists(cfg_path):
+            raise RuntimeError(str("%s: not a makenovel project. " +
+                                   "Please run `mnadmin.py` to create the" +
+                                   " makenovel project."))
+        
+        envdict = parse_cfg(cfg_path)
+        return NovelEnvironment( path, cfg_path, envdict.get('last_edit'),
+                                envdict.get('title'))
 
 class Novel(object):
     title = None
@@ -78,32 +188,11 @@ class Novel(object):
     versions = []
     drafts = []
     
-    DATADIR = '.novel'
-    NOVELFILE = os.path.join(DATADIR, 'novel')
-    PARTSFILE = os.path.join(DATADIR, 'parts.csv')
-    CHAPTERSFILE = os.path.join(DATADIR, 'chapters.csv')
-    PLOTLINESFILE = os.path.join(DATADIR, 'plotlines.csv')
-    VERSIONSFILE = os.path.join(DATADIR, 'versions.csv')
-    DRAFTSFILE = os.path.join(DATADIR, 'drafts.csv')
-    
-    _DATAFILES = (NOVELFILE, PARTSFILE, CHAPTERSFILE, PLOTLINESFILE,
-                  VERSIONSFILE, DRAFTSFILE)
-    
     def __init__(self, title=None, author=None, config={}, env=None):
         self.title = title
         self.author = author
         self.config = config
         self.env = env
-    
-    def add_plotlines(self, *plotlines):
-        for plotline in plotlines:
-            plotline.novel = self
-            self.plotlines.append(plotline)
-    
-    def add_parts(self, *parts):
-        for part in parts:
-            part.novel = self
-            self.parts.append(part)
     
     def set_config(self, key, value, create=False):
         if create and key not in self.config:
@@ -145,7 +234,7 @@ class Novel(object):
         return None
     
     def _write_csv(self, obj_set, path):
-        p = os.path.join(self.env.projdir, path)
+        p = os.path.join(self.env.proj_path, path)
         with open(path, 'w') as csv_file:
             csv_writer = csv.writer(csv_file)
             for obj in obj_set:
@@ -156,13 +245,13 @@ class Novel(object):
         return os.path.join(self.env.projdir, p)
     
     def write_plotlines(self):
-        self._write_csv(self.plotlines, self._get_data_path(Novel.PLOTLINESFILE))
+        self._write_csv(self.plotlines, self.env.plotlines_path)
     
     def write_parts(self):
-        self._write_csv(self.parts, self._get_data_path(Novel.PARTSFILE))
+        self._write_csv(self.parts, self.env.parts_path)
     
     def write_chapters(self):
-        self._write_csv(self.chapters, self._get_data_path(Novel.CHAPTERSFILE))
+        self._write_csv(self.chapters, self.env.chapters_path)
     
     def write_config(self):
         with open(self.env.config_path, 'w') as config_file:
@@ -197,103 +286,45 @@ class Novel(object):
         return subprocess.call(CMD)
     
     def git_commit_data(self, datafile, message=None):
-        if datafile not in Novel._DATAFILES:
-            raise ValueError("%s: Data file not found." % datafile)
-        path = os.path.join(self.env.projdir, datafile)
-        self.git_commit_files([path,], message)
-    
-    @classmethod
-    def loadConfigRef(Klass):
-        configs = {}
-        config_ref = os.path.join(
-            os.path.abspath(
-                os.path.dirname(__file__)),
-            'config.csv')
-        with open(config_ref) as configsfile:
-            reader = csv.reader(configsfile)
-            for row in reader:
-                c = Config(row[1], row[2])
-                configs.update({row[0]: c,})
-            configsfile.close()
-        return configs
-    
-    @classmethod
-    def getUserConfig(Klass, config_path=None):
-        
-        if config_path == '':
-            config_path = None
-        
-        config = Klass.loadConfigRef()
-        
-        if config_path is None:
-            config_dir = os.path.expanduser( '~/.makenovel')
-            config_path = os.path.join(config_dir, 'makenovel.cfg')
-            if not os.path.exists(config_dir):
-                os.makedirs(config_dir)
-            if not os.path.exists(config_path):
-                print("[makenovel] creating config file '%s'" % config_path)
-                with open(config_path, 'w') as cfg_file:
-                    for (k,v) in config.items():
-                        cfg_file.write('%s=%s\n' % (k, v.get_value()))
-                    cfg_file.close()
-        return config
+        self.git_commit_files([datafile,], message)
         
     @classmethod
-    def parse(Klass, env):
-        novel_path = os.path.join(env.projdir, Novel.NOVELFILE)
-        chapt_path = os.path.join(env.projdir, Novel.CHAPTERSFILE)
-        parts_path = os.path.join(env.projdir, Novel.PARTSFILE)
-        plotline_path = os.path.join(env.projdir, Novel.PLOTLINESFILE)
-        versions_path = os.path.join(env.projdir, Novel.VERSIONSFILE)
-        draft_path = os.path.join(env.projdir, Novel.DRAFTSFILE)
+    def load(Klass, path=None):
+        """
+        @brief Given a project's path, load the novel from that path.
         
-        # Novel Overview
-        novel_properties = {}
-        with open(novel_path) as novel_file:
-            for line in novel_file:
-                l = line.strip()
-                if not l.startswith('#') and len(l) > 1:
-                    x = l.split('=')
-                    novel_properties.update({x[0]: x[1],})
+        :param path: Project's path. If None, use the shell's current working
+            directory.
+        :type path: str
         
-        title = novel_properties['title']
-        config_path = novel_properties['config']
+        :returns: A new Novel
+        """
         
-        config = Klass.getUserConfig(config_path)
+        env = NovelEnvironment.load(path)
+        cfg = Config.get_user()
         
-        env.projdir = os.path.abspath(
-            os.path.dirname('.')
-            )
-        env.config_path = config_path
+        author = Author.from_config(cfg)
         
-        if config_path:
-            with open(config_path) as config_file:
-                for line in config_file:
-                    line = line.strip('\n')
-                    if not line.startswith('#'):
-                        x = line.split('=')
-                        if x[0] in config:
-                            config[x[0]].value = x[1]
-                config_file.close()
+        novel = Novel(env.title, author, cfg, env)
         
-        author = Author(config['author.first_name'],
-                        config['author.last_name'])
-        
-        novel = Novel(title, author, config, env)
-        
-        Part.from_file(novel, parts_path)
-        Plotline.from_file(novel, plotline_path)
+        Part.from_file(novel)
+        Plotline.from_file(novel)
+        Chapter.from_file(novel)
         
         return novel
     
     def __repr__(self):
         return "%s by %s" % (self.title, self.author)
 
+
 class Novelable(object):
     novel = None
     
     def __init__(self, novel):
         self.novel = novel
+    
+    def write_row(self):
+        raise NotImplementedError()
 
 
 class Taggable(object):
@@ -316,7 +347,6 @@ class Plotline(Novelable, Commentable, Taggable):
         self.novel = novel
         self.tag = tag
         self.comment = comment
-        os.path.join(self.novel.env.projdir, self.tag)
     
     def create_directory(self):
         os.makedirs(self.path)
@@ -326,8 +356,8 @@ class Plotline(Novelable, Commentable, Taggable):
             self.tag, self.novel, self.comment)
     
     @classmethod
-    def from_file(Klass, novel, path):
-        with open(path) as plf:
+    def from_file(Klass, novel):
+        with open(novel.env.plotlines_path) as plf:
             pl_reader = csv.reader(plf)
             for row in pl_reader:
                 p = Plotline(novel, row[0], row[1])
@@ -373,8 +403,8 @@ class Part(Novelable, Taggable):
             return '%d__%s' % (self.number, machine_str(self.title))
         
     @classmethod
-    def from_file(Klass, novel, path):
-        with open(path) as partsfile:
+    def from_file(Klass, novel):
+        with open(novel.env.parts_path) as partsfile:
             p_reader = csv.reader(partsfile)
             for row in p_reader:
                 (title, parent) = row
@@ -463,11 +493,11 @@ class Chapter(Taggable):
                              ])
     
     @classmethod
-    def from_file(self, novel, chapters_path):
+    def from_file(self, novel):
         
         n = 0
         
-        with open(chapters_path) as chaptersfile:
+        with open(novel.env.chapters_path) as chaptersfile:
             ch_reader = csv.reader(chaptersfile)
             for row in ch_reader:
                 (tag, path, plotline_tag, part_tag, title) = row
