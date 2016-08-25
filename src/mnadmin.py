@@ -6,8 +6,6 @@ import os
 import subprocess
 import shutil
 
-from makenovel import git_add_files_and_commit
-
 DFLT_CONFIG_FILE=os.path.abspath(
     os.path.expanduser('~/.makenovel/config'))
 CURRDIR = os.path.abspath('.')

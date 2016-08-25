@@ -328,30 +328,11 @@ def show_draft(novel):
 
 # add
 
-def git_add_files_and_commit(paths=[], message=None):
-    for i in paths:
-        if not os.path.exists(i):
-            raise RuntimeError("%s: path not found\n" % i)
-    if isinstance(paths, list) or isinstance(paths, tuple):
-        paths = ' '.join(paths)
-    if paths and len(paths) > 0:
-        CMD=[GIT, 'add', paths]
-        print("[shell] %s" % (" ".join(CMD)))
-        subprocess.call(CMD)
-    if message:
-        CMD=[GIT, 'commit', '-am', '"%s"' % message]
-    else:
-        CMD=[GIT, 'commit', '-a']
-    print("[shell] %s" % (" ".join(CMD)))
-    return subprocess.call(CMD)
-
 def add_plotline(novel, tag, description):
     if novel.find_plotline(tag) is not None:
-        sys.stderr.write("%s: plotline tag already exists\n" % tag)
-        sys.exit(1)
-    novel.add_plotlines(Plotline(novel, tag, description))
+        raise RuntimeError("%s: plotline tag already exists\n" % tag)
+    novel.plotlines.append(Plotline(novel, tag, description))
     novel.write_plotlines()
-    git_add_files_and_commit([PLOTLINESFILE], message='add plotline %s' % tag)
 
 def add_part(novel, title=None, before_tag=None, after_tag=None, parent_tag=None):
     # First check if the tags are valid
@@ -359,18 +340,15 @@ def add_part(novel, title=None, before_tag=None, after_tag=None, parent_tag=None
     if before_tag is not None:
         before = novel.find_part(before_tag)
         if before is None:
-            print("'%s': part not found for 'before'" % before_tag)
-            sys.exit(1)
+            raise RuntimeError("'%s': part not found")
     if after_tag is not None:
         after = novel.find_part(after_tag)
         if after is None:
-            print("'%s': part not found for 'after'" % after_tag)
-            sys.exit(1)
+            raise RuntimeError("'%s': part not found")
     if parent_tag is not None:
         parent = novel.find_part(parent_tag)
         if parent is None:
-            print("'%s': part not found for 'parent'" % parent_tag)
-            sys.exit(1)
+            raise RuntimeError("'%s': part not found")
     
     part = Part(novel, title, parent)
     
@@ -378,11 +356,11 @@ def add_part(novel, title=None, before_tag=None, after_tag=None, parent_tag=None
         novel.parts.insert(novel.parts.index(before), part)
     elif after:
         novel.parts.insert(novel.parts.index(after)+1, part)
-    
-    novel.parts.append(part)
-    
+    else:
+        novel.parts.append(part)
+        
     novel.write_parts()
-    git_add_files_and_commit([PARTSFILE,], message='add part %s' % part.tag)
+    novel.git_commit_data(Novel.PARTSFILE)
 
 def add_chapter(novel, plotline_tag, title, part_tag):
     
@@ -397,15 +375,10 @@ def add_chapter(novel, plotline_tag, title, part_tag):
     
     i = len(novel.chapters)+1
     c = Chapter(plotline=plotline, novel=novel, title=title, part=part, number=i)
-    with open(CHAPTERSFILE, 'a') as chaptersfile:
-        ch_writer = csv.writer(chaptersfile)
-        c.write_row(ch_writer)
-        chaptersfile.close()
+    novel.write_chapters()
     
-    if not os.path.exists(c.path):
-        open(c.path,'x').close()
-    
-    git_add_files_and_commit([c.path, CHAPTERSFILE,], "Add chapter %s" % c)
+    novel.git_commit_files([c.path])
+    novel.git_commit_data(Novel.CHAPTERSFILE, "Add %s" % c)
 
 # update
 
@@ -449,7 +422,8 @@ def update_part(novel, tag, title, before_tag, after_tag, parent_tag):
             p.write_row(writer)
         partsfile.close()
     
-    git_add_files_and_commit([PARTSFILE,], "Update part %s" % part_tag)
+    novel.write_parts()
+    novel.git_commit_data(Novel.PARTSFILE, "Update part %s" % part)
 
 def update_plotline(novel, tag, new_tag, description):
     plotline = novel.find_plotline(tag)
@@ -465,8 +439,7 @@ def update_plotline(novel, tag, new_tag, description):
         plotline.comment = description
     
     novel.write_plotlines()
-    
-    git_add_files_and_commit([PLOTLINESFILE,], "Update plotline %s" % tag)
+    novel.git_commit_data(Novel.PARTSFILE, "Update plotline %s" % plotline)
 
 def update_chapter(novel, tag, plotline_tag, part_tag, before_tag, after_tag):
     (plotline, part, before, after) = (None, )*4
@@ -526,9 +499,10 @@ def update_chapter(novel, tag, plotline_tag, part_tag, before_tag, after_tag):
             novel.chapters.index(chapter)+1,
             novel.chapters.pop(chapter)
             )
-        
-    chapter.reset_tag_and_path()
     
+    novel.write_chapters()
+    novel.git_commit_files(chapter.path)
+    novel.git_commit_data(Novel.CHAPTERSFILE, "Update %s" % chapter)
         
 
 def update_version(novel, tag, rename_tag, comment):

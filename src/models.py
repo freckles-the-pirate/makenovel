@@ -5,14 +5,6 @@ import sys
 import csv
 import shutil
 
-DATADIR = '.novel'
-NOVELFILE = os.path.join(DATADIR, 'novel')
-PARTSFILE = os.path.join(DATADIR, 'parts.csv')
-CHAPTERSFILE = os.path.join(DATADIR, 'chapters.csv')
-PLOTLINESFILE = os.path.join(DATADIR, 'plotlines.csv')
-VERSIONSFILE = os.path.join(DATADIR, 'versions.csv')
-DRAFTSFILE = os.path.join(DATADIR, 'drafts.csv')
-
 def machine_str(s):
     s2 = s.lower().replace( ' ', '_' )
     for i in ('!', '.', "'", '"', ','):
@@ -86,6 +78,17 @@ class Novel(object):
     versions = []
     drafts = []
     
+    DATADIR = '.novel'
+    NOVELFILE = os.path.join(DATADIR, 'novel')
+    PARTSFILE = os.path.join(DATADIR, 'parts.csv')
+    CHAPTERSFILE = os.path.join(DATADIR, 'chapters.csv')
+    PLOTLINESFILE = os.path.join(DATADIR, 'plotlines.csv')
+    VERSIONSFILE = os.path.join(DATADIR, 'versions.csv')
+    DRAFTSFILE = os.path.join(DATADIR, 'drafts.csv')
+    
+    _DATAFILES = (NOVELFILE, PARTSFILE, CHAPTERSFILE, PLOTLINESFILE,
+                  VERSIONSFILE, DRAFTSFILE)
+    
     def __init__(self, title=None, author=None, config={}, env=None):
         self.title = title
         self.author = author
@@ -153,19 +156,51 @@ class Novel(object):
         return os.path.join(self.env.projdir, p)
     
     def write_plotlines(self):
-        self._write_csv(self.plotlines, self._get_data_path(PLOTLINESFILE))
+        self._write_csv(self.plotlines, self._get_data_path(Novel.PLOTLINESFILE))
     
     def write_parts(self):
-        self._write_csv(self.parts, self._get_data_path(PARTSFILE))
+        self._write_csv(self.parts, self._get_data_path(Novel.PARTSFILE))
     
     def write_chapters(self):
-        self._write_csv(self.chapters, self._get_data_path(CHAPTERSFILE))
+        self._write_csv(self.chapters, self._get_data_path(Novel.CHAPTERSFILE))
     
     def write_config(self):
         with open(self.env.config_path, 'w') as config_file:
             for (k, v) in self.config.items():
                 config_file.write('%s=%s\n' % (k, v.get_value()))
             config_file.close()
+    
+    def git_add_files(self, paths=[]):
+        import subprocess
+        if not issubclass(paths, list):
+            raise TypeError("`paths` must be a list.")
+        for i in paths:
+            if not os.path.exists(i):
+                raise RuntimeError("%s: path not found\n" % i)
+            
+        git_cmd = self.get_config('git.path')
+        CMD=[git_cmd, 'add', " ".join('"%s"' % p for p in paths)]
+        print("[shell] %s" % (" ".join(CMD)))
+        return subprocess.call(CMD)
+        
+    def git_commit_files(self, paths=[], message=None):
+        import subprocess
+        for p in paths:
+            if not os.path.exists(p):
+                raise RuntimeError("%s: path not found" % p)
+        
+        git_cmd = self.get_config('git.path')
+        CMD=[git_cmd, 'commit']
+        if message:
+            CMD.extend(['-m', '"%s"' % message])
+        print("[shell] %s" % (" ".join(CMD)))
+        return subprocess.call(CMD)
+    
+    def git_commit_data(self, datafile, message=None):
+        if datafile not in Novel._DATAFILES:
+            raise ValueError("%s: Data file not found." % datafile)
+        path = os.path.join(self.env.projdir, datafile)
+        self.git_commit_files([path,], message)
     
     @classmethod
     def loadConfigRef(Klass):
@@ -181,15 +216,36 @@ class Novel(object):
                 configs.update({row[0]: c,})
             configsfile.close()
         return configs
+    
+    @classmethod
+    def getUserConfig(Klass, config_path=None):
+        
+        if config_path == '':
+            config_path = None
+        
+        config = Klass.loadConfigRef()
+        
+        if config_path is None:
+            config_dir = os.path.expanduser( '~/.makenovel')
+            config_path = os.path.join(config_dir, 'makenovel.cfg')
+            if not os.path.exists(config_dir):
+                os.makedirs(config_dir)
+            if not os.path.exists(config_path):
+                print("[makenovel] creating config file '%s'" % config_path)
+                with open(config_path, 'w') as cfg_file:
+                    for (k,v) in config.items():
+                        cfg_file.write('%s=%s\n' % (k, v.get_value()))
+                    cfg_file.close()
+        return config
         
     @classmethod
     def parse(Klass, env):
-        novel_path = os.path.join(env.projdir, NOVELFILE)
-        chapt_path = os.path.join(env.projdir, CHAPTERSFILE)
-        parts_path = os.path.join(env.projdir, PARTSFILE)
-        plotline_path = os.path.join(env.projdir, PLOTLINESFILE)
-        versions_path = os.path.join(env.projdir, VERSIONSFILE)
-        draft_path = os.path.join(env.projdir, DRAFTSFILE)
+        novel_path = os.path.join(env.projdir, Novel.NOVELFILE)
+        chapt_path = os.path.join(env.projdir, Novel.CHAPTERSFILE)
+        parts_path = os.path.join(env.projdir, Novel.PARTSFILE)
+        plotline_path = os.path.join(env.projdir, Novel.PLOTLINESFILE)
+        versions_path = os.path.join(env.projdir, Novel.VERSIONSFILE)
+        draft_path = os.path.join(env.projdir, Novel.DRAFTSFILE)
         
         # Novel Overview
         novel_properties = {}
@@ -203,21 +259,7 @@ class Novel(object):
         title = novel_properties['title']
         config_path = novel_properties['config']
         
-        if config_path == '':
-            config_path = None
-        
-        config = Klass.loadConfigRef()
-        
-        if config_path is None:
-            config_dir = os.path.expanduser( '~/.makenovel')
-            config_path = os.path.join(config_dir, 'makenovel.cfg')
-            if not os.path.exists(config_dir):
-                os.makedirs(config_dir)
-            if not os.path.exists(config_path):
-                with open(config_path, 'w') as cfg_file:
-                    for (k,v) in config.items():
-                        cfg_file.write('%s=%s\n' % (k, v.get_value()))
-                    cfg_file.close()
+        config = Klass.getUserConfig(config_path)
         
         env.projdir = os.path.abspath(
             os.path.dirname('.')
@@ -308,6 +350,7 @@ class Part(Novelable, Taggable):
     parent=None
     children=[]
     chapters=[]
+    number=0
     
     def __init__(self, novel, title=None, parent=None):
         self.novel = novel
@@ -315,14 +358,12 @@ class Part(Novelable, Taggable):
         self.parent = parent
         
         if self.parent:
-            self.parent.children.append(self)
-    
-    @property
-    def number(self):
-        if self.parent:
-            return len(self.parent.children)+1
+            self.number = len(self.parent.children)+1
         else:
-            return len(self.novel.parts)+1
+            self.number = len(self.novel.parts)+1
+        
+        if self.parent:
+            self.parent.children.append(self)
     
     @property
     def tag(self):
