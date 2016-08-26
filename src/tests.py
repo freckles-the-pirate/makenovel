@@ -28,11 +28,11 @@ class TestNovel(unittest.TestCase):
     
     def __init__(self, methodName):
         
+        create_project("testnovel", "Test Novel", "ancient")
+        
         self.proj_path = os.path.join(TestNovel.CURRDIR, "testnovel")
         
         config = Config.get_ref()
-            
-        create_project("testnovel", "Test Novel", "ancient")
         
         title = "Test Novel"
         author = Author("John", "Smith")
@@ -87,12 +87,21 @@ class TestNovel(unittest.TestCase):
         for i in range(0, len(self.novel.parts)):
             self.assertEqual(self.novel.parts[i].number, i+1)
     
+    def testAddChapter(self):
+        self.assertEqual(len(self.novel.chapters), 0)
+        add_chapter(self.novel, "main", "First Test Chapter", "1")
+        self.assertEqual(len(self.novel.chapters), 1)
+        self.assertIsNotNone(self.novel.find_chapter("1__first_test_chapter"))
+        part = self.novel.find_part("1")
+        self.assertIn(self.novel.chapters[0], part.chapters)
+    
     def tearDown(self):
-        #if os.path.exists(self.proj_path):
-            #shutil.rmtree(self.proj_path)
         self.novel = None
         self.env = None
         self.proj_path = None
 
 if __name__=='__main__':
     unittest.main()
+    projpath = os.path.join(os.path.dirname(__file__), "testnovel")
+    if os.path.exists(projpath):
+        shutil.rmtree(projpath)

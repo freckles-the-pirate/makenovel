@@ -242,7 +242,7 @@ class Novel(object):
             csv_file.close()
     
     def _get_data_path(self, p):
-        return os.path.join(self.env.projdir, p)
+        return os.path.join(self.env.proj_path, p)
     
     def write_plotlines(self):
         self._write_csv(self.plotlines, self.env.plotlines_path)
@@ -387,13 +387,16 @@ class Part(Novelable, Taggable):
         self.title = title
         self.parent = parent
         
-        if self.parent:
-            self.number = len(self.parent.children)+1
-        else:
-            self.number = len(self.novel.parts)+1
         
         if self.parent:
             self.parent.children.append(self)
+    
+    @property
+    def number(self):
+        if self.parent:
+            return self.parent.children.index(self) + 1
+        else:
+            return self.novel.parts.index(self) + 1
     
     @property
     def tag(self):
@@ -463,9 +466,9 @@ class Chapter(Taggable):
                                   self.novel.config.get(
                                       'chapter.ext', 'rst'))
             if self.plotline is not None:
-                pre = os.path.join(self.novel.env.projdir, self.plotline.tag)
+                pre = os.path.join(self.novel.env.proj_path, self.plotline.tag)
             else:
-                pre = os.path.join(self.novel.env.projdir)
+                pre = os.path.join(self.novel.env.proj_path)
             self.path = os.path.join(pre, filename)
         
         if self.path != old_path and None not in (self.path, old_path):

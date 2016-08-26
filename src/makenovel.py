@@ -360,7 +360,7 @@ def add_part(novel, title=None, before_tag=None, after_tag=None, parent_tag=None
         novel.parts.append(part)
         
     novel.write_parts()
-    novel.git_commit_data(Novel.PARTSFILE)
+    novel.git_commit_data(novel.env.parts_path)
 
 def add_chapter(novel, plotline_tag, title, part_tag):
     
@@ -375,10 +375,19 @@ def add_chapter(novel, plotline_tag, title, part_tag):
     
     i = len(novel.chapters)+1
     c = Chapter(plotline=plotline, novel=novel, title=title, part=part, number=i)
+    novel.chapters.append(c)
+    if part:
+        part.chapters.append(c)
+    
+    # First create the plotline directory if it doesn't exist.
+    if not os.path.exists(os.path.dirname(c.path)):
+        os.makedirs(os.path.dirname(c.path))
+    if not os.path.exists(c.path):
+        open(c.path).close()
     novel.write_chapters()
     
     novel.git_commit_files([c.path])
-    novel.git_commit_data(Novel.CHAPTERSFILE, "Add %s" % c)
+    novel.git_commit_data(novel.env.chapters_path, "Add %s" % c)
 
 # update
 
