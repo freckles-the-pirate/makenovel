@@ -151,7 +151,7 @@ class NovelEnvironment(object):
                            self.drafts_path]
         dataparts = ('parts', 'plotlines', 'chapters', 'versions', 'drafts')
         
-        self.data_dir = os.path.join(self.proj_path, '.novel')
+        self.data_dir = os.path.abspath(os.path.join(self.proj_path, '.novel'))
         
         self.novel_path = os.path.join(self.data_dir, 'novel')
         self.parts_path = os.path.join(self.data_dir, 'parts.csv')
@@ -261,16 +261,17 @@ class Novel(object):
     
     def git_add_files(self, paths=[]):
         import subprocess
-        if not issubclass(paths, list):
+        if not issubclass(type(paths), list):
             raise TypeError("`paths` must be a list.")
         for i in paths:
             if not os.path.exists(i):
                 raise RuntimeError("%s: path not found\n" % i)
             
         git_cmd = self.get_config('git.path')
-        CMD=[git_cmd, 'add', " ".join('"%s"' % p for p in paths)]
-        print("[shell] %s" % (" ".join(CMD)))
-        return subprocess.call(CMD)
+        for p in paths:
+            CMD=[git_cmd, 'add', p]
+            print("[shell] %s" % (" ".join(CMD)))
+            return subprocess.call(CMD)
         
     def git_commit_files(self, paths=[], message=None):
         import subprocess
@@ -281,7 +282,7 @@ class Novel(object):
         git_cmd = self.get_config('git.path')
         CMD=[git_cmd, 'commit']
         if message:
-            CMD.extend(['-m', '"%s"' % message])
+            CMD.extend(['-am', '"%s"' % message])
         print("[shell] %s" % (" ".join(CMD)))
         return subprocess.call(CMD)
     
@@ -342,6 +343,7 @@ class Commentable(object):
 
 class Plotline(Novelable, Commentable, Taggable):
     path = None
+    chapters = []
     
     def __init__(self, novel, tag, comment=None):
         self.novel = novel
@@ -368,10 +370,6 @@ class Plotline(Novelable, Commentable, Taggable):
     
     def _is_ch(self, x):
         return x.plotline == self
-    
-    @property
-    def chapters(self):
-        return filter(self._is_ch, self.novel.chapters)
 
 class Part(Novelable, Taggable):
     
@@ -471,13 +469,23 @@ class Chapter(Taggable):
                 pre = os.path.join(self.novel.env.proj_path)
             self.path = os.path.join(pre, filename)
         
-        if self.path != old_path and None not in (self.path, old_path):
-            shutil.copy(old_path, self.path)
-            print("[shell] cp %s %s" % (old_path, self.path))
-    
+        if old_path is not None:
+            old_path = os.path.abspath(old_path)
+        
+        if self.path is not None:
+            self.path = os.path.abspath(self.path)
+        
+        if None in (old_path, self.path) or old_path == self.path:
+            return
+        
+        shutil.copy(old_path, self.path)
+        print("[shell] cp %s %s" % (old_path, self.path))
+
     def word_count(self):
         count = 0
-        with open(self.path, 'r') as f:
+        if not os.path.exists(self.path):
+            return 0
+        with open(self.path, 'r+') as f:
             count += len(f.read().split(' '))
             f.close()
         return count
@@ -488,10 +496,15 @@ class Chapter(Taggable):
         return "[%s] Chapter %d" % (self.tag, self.number)
     
     def write_row(self, csvwriter):
-        csvwriter.writerow([self.tag,
-                             self.path,
-                             self.plotline.tag, 
-                             self.part.tag,
+        part_tag = None
+        plotline_tag = None
+        if self.part:
+            part_tag = self.part.tag
+        if self.plotline:
+            plotline_tag = self.plotline.tag
+        csvwriter.writerow([self.path,
+                             plotline_tag, 
+                             part_tag,
                              self.title,
                              ])
     
@@ -503,7 +516,7 @@ class Chapter(Taggable):
         with open(novel.env.chapters_path) as chaptersfile:
             ch_reader = csv.reader(chaptersfile)
             for row in ch_reader:
-                (tag, path, plotline_tag, part_tag, title) = row
+                (path, plotline_tag, part_tag, title) = row
                 
                 part = None
                 if part_tag is not None:
@@ -524,9 +537,10 @@ class Chapter(Taggable):
                                   title=title,
                                   part=part,
                                   number=n,
-                                  tag=tag,
                                   path=path)
                 novel.chapters.append(chapter)
+                if plotline is not None:
+                    plotline.chapters.append(chapter)
                 if part is not None:
                     part.chapters.append(chapter)
             chaptersfile.close()

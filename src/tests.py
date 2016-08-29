@@ -26,7 +26,7 @@ class TestNovel(unittest.TestCase):
     env = None
     proj_path = None
     
-    def __init__(self, methodName):
+    def setUp(self):
         
         create_project("testnovel", "Test Novel", "ancient")
         
@@ -49,8 +49,8 @@ class TestNovel(unittest.TestCase):
                                    message="Add test plotlines")
         self.novel.git_commit_data(self.novel.env.parts_path,
                                    message='add test parts')
+        os.chdir(self.proj_path)
         
-        super(TestNovel, self).__init__(methodName)
     
     def testBasicAdds(self):
         self.assertEqual(len(self.novel.parts), 2)
@@ -71,7 +71,6 @@ class TestNovel(unittest.TestCase):
         show_plotline(self.novel, "main")
     
     def testAddPlotline(self):
-        self.setUp()
         self.assertEqual(len(self.novel.plotlines), 2)
         with open(self.novel.env.plotlines_path) as plf:
             for l in plf:
@@ -96,12 +95,12 @@ class TestNovel(unittest.TestCase):
         self.assertIn(self.novel.chapters[0], part.chapters)
     
     def tearDown(self):
+        os.chdir(os.path.abspath(os.path.join(self.proj_path, '..')))
+        if os.path.exists(self.proj_path):
+            shutil.rmtree(self.proj_path)
         self.novel = None
         self.env = None
         self.proj_path = None
 
 if __name__=='__main__':
     unittest.main()
-    projpath = os.path.join(os.path.dirname(__file__), "testnovel")
-    if os.path.exists(projpath):
-        shutil.rmtree(projpath)

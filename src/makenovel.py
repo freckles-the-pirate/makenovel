@@ -113,8 +113,6 @@ parser_add_draft.add_argument('-c', '--comment')
 parser_add_draft.set_defaults(which='add_draft')
 
 ### EDIT and UPDATE ###
-parser_edit = subparsers.add_parser('edit')
-subparsers_edit = parser_edit.add_subparsers()
 parser_update = subparsers.add_parser('update')
 subparsers_update = parser_update.add_subparsers()
 
@@ -141,29 +139,15 @@ parser_update_plotline.add_argument('-d', '--description',
     help="What happens in this plotline?")
 parser_update_plotline.set_defaults(which='update_plotline')
 
-### "edit chapter" ###
-parser_edit_chapter = subparsers_edit.add_parser('chapter')
-parser_edit_chapter.add_argument('-e', '--editor',
-    help='Full path to an alternative editor', type=str)
-parser_edit_chapter_continue = parser_edit_chapter.add_mutually_exclusive_group(required=True)
-parser_edit_chapter_continue.add_argument('--tag', type=str,
-    help='Chapter tag to edit.')
-parser_edit_chapter_continue.add_argument('-c', '--continue',
-    help='Continue editing where you last left off',
-    action='store_true')
-parser_edit_chapter.set_defaults(which='edit_chapter')
-
 ### "update chapter" subparser ###
 parser_update_chapter = subparsers_update.add_parser('chapter')
+parser_update_chapter.add_argument('tag')
 parser_update_chapter.add_argument('-t', '--title')
 parser_update_chapter.add_argument('-p', '--plotline',
     help='Plotline associated with the chapter',
-    nargs=1,
     required=True)
 parser_update_chapter.add_argument('-P', '--part',
-    help='Place this chapter in a part',
-    nargs=1,
-    metavar='PART_TAG')
+    help='Place this chapter in a part')
 parser_update_chapter.set_defaults(which='update_chapter')
 chapter_order = parser_update_chapter.add_mutually_exclusive_group()
 chapter_order.add_argument('-b', '--before', nargs=1,
@@ -187,6 +171,19 @@ parser_update_draft.add_argument('-c', '--comment')
 parser_update_draft.add_argument('tag', help='draft tag')
 parser_update_draft.set_defaults(which='update_draft')
 
+### "edit chapter" ###
+parser_edit = subparsers.add_parser('edit')
+parser_edit.add_argument('-e', '--editor',
+    help='Full path to an alternative editor', type=str)
+parser_edit_chapter_continue = parser_edit.add_mutually_exclusive_group(
+    required=True)
+parser_edit_chapter_continue.add_argument('--tag', type=str,
+    help='Chapter tag to edit.')
+parser_edit_chapter_continue.add_argument('-c', '--continue',
+    help='Continue editing where you last left off',
+    action='store_true')
+parser_edit.set_defaults(which='edit_chapter')
+
 ### "delete" subparser ###
 parser_delete = subparsers.add_parser('delete')
 parser_delete.add_argument('object', choices=[
@@ -198,12 +195,13 @@ parser_delete.add_argument('-f', '--force',
 parser_delete.set_defaults(which='delete')
 
 parser_bind = subparsers.add_parser('bind')
-parser_bind.add_argument('-d', '--draft',
-    help="Tag of the draft to use. If omitted, latest draft will be used.")
+parser_bind.add_argument('-d', '--draft', action='store_true',
+                         help="This version is a draft.")
 parser_bind.set_defaults(which='bind')
 
 ### "import" subparser
 parser_import = subparsers.add_parser("import")
+parser_import.set_defaults(which='import')
 
 ### IMPORT CHAPTER
 subparsers_import = parser_import.add_subparsers()
@@ -383,7 +381,7 @@ def add_chapter(novel, plotline_tag, title, part_tag):
     if not os.path.exists(os.path.dirname(c.path)):
         os.makedirs(os.path.dirname(c.path))
     if not os.path.exists(c.path):
-        open(c.path).close()
+        open(c.path, 'w+').close()
     novel.write_chapters()
     
     novel.git_commit_files([c.path])
@@ -450,7 +448,8 @@ def update_plotline(novel, tag, new_tag, description):
     novel.write_plotlines()
     novel.git_commit_data(Novel.PARTSFILE, "Update plotline %s" % plotline)
 
-def update_chapter(novel, tag, plotline_tag, part_tag, before_tag, after_tag):
+def update_chapter(novel, tag, plotline_tag, title, part_tag,
+                   before_tag, after_tag):
     (plotline, part, before, after) = (None, )*4
     
     chapter = novel.find_chapter(tag)
@@ -461,6 +460,9 @@ def update_chapter(novel, tag, plotline_tag, part_tag, before_tag, after_tag):
     # The tag will be overwritten, so save it, just in case.
     old_tag = chapter.tag
     
+    if title:
+        chapter.title = title
+    
     if plotline_tag:
         plotline = novel.find_plotline(plotline_tag)
         if plotline is None:
@@ -469,8 +471,8 @@ def update_chapter(novel, tag, plotline_tag, part_tag, before_tag, after_tag):
         old_plotline = chapter.plotline
         chapter.plotline = plotline
         plotline.chapters.append(
-            old_plotline.pop(
-                old_plotline.index(chapter)
+            old_plotline.chapters.pop(
+                old_plotline.chapters.index(chapter)
             )
         )
     
@@ -510,8 +512,9 @@ def update_chapter(novel, tag, plotline_tag, part_tag, before_tag, after_tag):
             )
     
     novel.write_chapters()
-    novel.git_commit_files(chapter.path)
-    novel.git_commit_data(Novel.CHAPTERSFILE, "Update %s" % chapter)
+    novel.git_add_files([novel.env.data_dir, chapter.path])
+    novel.git_commit_files([chapter.path, novel.env.chapters_path],
+                           "Update %s" % chapter)
         
 
 def update_version(novel, tag, rename_tag, comment):
@@ -549,7 +552,9 @@ def edit_chapter(novel, cont, tag, editor):
     print("[shell] %s" % ' '.join(CMD))
     subprocess.call(CMD)
     
-    git_add_files_and_commit([chapter.path,], "Edit %s" % chapter)
+    novel.git_add_files([chapter.path, novel.env.chapters_path])
+    novel.git_commit_files([chapter.path, novel.env.chapters_path],
+                           "Edit %s" % chapter)
 
 ## Delete methods ##
 
@@ -560,10 +565,7 @@ def delete_part(novel, tag, force):
     pass
 
 def delete_chapter(novel, tag, force):
-    chapter = None
-    for c in novel.chapters:
-        if c.tag() == tag:
-            chapter = c
+    chapter = novel.find_chapter(tag)
     if not chapter:
         print("%s: Invalid chapter tag" % tag)
         sys.exit(1)
@@ -596,6 +598,7 @@ def delete_draft(novel, tag, force):
 def import_chapter(novel, origin, plotline_tag, title, part_tag, before_tag, 
                     after_tag):
     
+    (plotline, part, before, after) = (None,)*4
     if plotline_tag:
         plotline = novel.find_plotline(plotline_tag)
         if not plotline:
@@ -625,8 +628,12 @@ def import_chapter(novel, origin, plotline_tag, title, part_tag, before_tag,
         sys.exit(1)
         
     chapter = Chapter(plotline, novel, title, part)
+    if not os.path.exists(os.path.dirname(chapter.path)):
+        os.makedirs(os.path.dirname(chapter.path))
     if not os.path.exists(chapter.path):
-        open(chapter.path, 'x').close()
+        open(chapter.path, 'a+').close()
+    
+    novel.chapters.append(chapter)
     
     with open(origin, 'r') as originfile:
         with open(chapter.path, 'w') as destfile:
@@ -638,9 +645,13 @@ def import_chapter(novel, origin, plotline_tag, title, part_tag, before_tag,
     if chapter.plotline:
         plotline_dir = chapter.plotline.path
     
-    files = [CHAPTERSFILE, chapter.path, plotline_dir]
-    print("Commiting: %s" % (", ".join(files)))
-    git_add_files_and_commit(files, "Import %s" % chapter)
+    files = [CHAPTERSFILE, chapter.path]
+    if plotline_dir:
+        files.append(plotline_dir)
+    novel.write_chapters()
+    novel.git_add_files([chapter.path])
+    novel.git_commit_files([chapter.path, novel.env.chapters_path],
+                           "Import %s" % chapter)
 
 def main(argv):
     if not os.path.exists(DATADIR):
@@ -654,8 +665,7 @@ Use `mnadmin' to create the novel project. Thank you.")
         
     args = parser.parse_args(argv[1:])
     
-    env = NovelEnvironment(projdir=PROJDIR)
-    novel = Novel.parse(env)
+    novel = Novel.load()
     
     if getattr(args, 'which', '') == 'config':
         parsed = parser_config.parse_args(argv[2:])
@@ -752,7 +762,7 @@ Use `mnadmin' to create the novel project. Thank you.")
         elif args.which == 'add_draft':
             add_draft(novel, parsed.tag)
     
-    elif getattr(args, 'which', '').startswith('update_'):
+    elif getattr(args, 'which', '').startswith('update'):
         parsed = parser_update.parse_args(argv[2:])
         tag = getattr(parsed, 'tag', None)
         new_tag = getattr(parsed, 'new_tag', None)
@@ -769,11 +779,14 @@ Use `mnadmin' to create the novel project. Thank you.")
         elif args.which == 'update_part':
             update_part(novel, tag, title, before, after, parent)
         elif args.which == 'update_chapter':
-            update_chapter(novel, plotline, title, part)
+            update_chapter(novel, tag, plotline, title, part, before, after)
         elif args.which == 'update_version':
             update_version(novel, parsed.tag)
         elif args.which == 'update_draft':
             update_draft(novel, parsed.tag)
+        elif args.which == 'update':
+            parser_update.print_help()
+            sys.exit(1)
     
     elif getattr(args, 'which', '') == 'edit_chapter':
         parsed = parser_edit.parse_args(argv[2:])
@@ -811,6 +824,9 @@ Use `mnadmin' to create the novel project. Thank you.")
         
         if args.which == 'import_chapter':
             import_chapter(novel, origin, plotline, title, part, before, after)
+        
+        if args.which == 'import':
+            parser_import.print_usage()
 
 if __name__=="__main__":
     main(sys.argv)
