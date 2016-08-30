@@ -100,18 +100,6 @@ chapter_order.add_argument('-a', '--after', nargs=1,
     help='Add this chapter after `chapter_tag`')
 parser_add_chapter.set_defaults(which='add_chapter')
 
-### "add version" subparser ###
-parser_add_version = subparsers_add.add_parser('version')
-parser_add_version.add_argument('-t', '--tag')
-parser_add_version.add_argument('-c', '--comment')
-parser_add_version.set_defaults(which='add_version')
-
-### "add draft" subparser ###
-parser_add_draft = subparsers_add.add_parser('draft')
-parser_add_draft.add_argument('-t', '--tag')
-parser_add_draft.add_argument('-c', '--comment')
-parser_add_draft.set_defaults(which='add_draft')
-
 ### EDIT and UPDATE ###
 parser_update = subparsers.add_parser('update')
 subparsers_update = parser_update.add_subparsers()
@@ -194,9 +182,12 @@ parser_delete.add_argument('-f', '--force',
     action='store_true')
 parser_delete.set_defaults(which='delete')
 
+### "bind" subparser
 parser_bind = subparsers.add_parser('bind')
-parser_bind.add_argument('-d', '--draft', action='store_true',
-                         help="This version is a draft.")
+parser_bind.add_argument('-s', '--stage', type=str,
+                         help="If you're creating a draft, what type of draft?")
+parser_bind.add_argument('-c', '--comment', type=str,
+                         help="A long description of this version.")
 parser_bind.set_defaults(which='bind')
 
 ### "import" subparser
@@ -653,6 +644,10 @@ def import_chapter(novel, origin, plotline_tag, title, part_tag, before_tag,
     novel.git_commit_files([chapter.path, novel.env.chapters_path],
                            "Import %s" % chapter)
 
+def bind_novel(novel, comment, stage):
+    version = novel.bind(comment, stage)
+    print("New %s created: %s" % (type(version).__name__, version.path))
+
 def main(argv):
     if not os.path.exists(DATADIR):
         print("This is not a makenovel project. \
@@ -722,8 +717,8 @@ Use `mnadmin' to create the novel project. Thank you.")
             list_drafts(novel)
     
     elif getattr(args, 'which', '') == 'show':
-        obj = getattr(parser_show.parse_args(argv[2:]), 'object')
-        tag = getattr(parser_show.parse_args(argv[2:]), 'tag')
+        obj = getattr(parser_show.parse_args(argv[2:]), 'object', None)
+        tag = getattr(parser_show.parse_args(argv[2:]), 'tag', None)
         if obj == 'novel':
             show_novel(novel)
         elif tag is None:
@@ -827,6 +822,13 @@ Use `mnadmin' to create the novel project. Thank you.")
         
         if args.which == 'import':
             parser_import.print_usage()
+    
+    elif getattr(args, 'which', '') == 'bind':
+        parsed = parser_import.parse_args(argv[2:])
+        comment = getattr(parsed, 'comment', None)
+        stage = getattr(parsed, 'stage', None)
+        
+        bind_novel(novel, comment, stage)
 
 if __name__=="__main__":
     main(sys.argv)

@@ -4,6 +4,9 @@ import os
 import sys
 import csv
 import shutil
+import datetime
+
+UNIX_DATE_FORMAT="%Y-%m-%d %H:%M:%S %z"
 
 def machine_str(s):
     s2 = s.lower().replace( ' ', '_' )
@@ -111,16 +114,18 @@ class Author(object):
     
     @classmethod
     def from_config(Klass, config):
-        return Author(
-            config.get('author.first_name'),
-            config.get('author.last_name'),
-            config.get('author.middle_name'),
-            config.get('author.email_address'),
-            config.get('author.phone_number'),
-            config.get('author.street_address'),
-            config.get('author.city'),
-            config.get('author.state')
+        mapping = (
+            'first_name',  'email_address', 'last_name', 'middle_name',
+            'phone_number', 'street_address', 'city', 'state',
             )
+        values = {}
+        for m in mapping:
+            v = config.get('author.%s' % m)
+            if v:
+                values[m] = v.value
+        print("Author values: %s" % values)
+        print("From config: %s" % config)
+        return Author(**values)
 
 
 class NovelEnvironment(object):
@@ -253,11 +258,65 @@ class Novel(object):
     def write_chapters(self):
         self._write_csv(self.chapters, self.env.chapters_path)
     
+    def write_versions(self):
+        self._write_csv(self.versions, self.env.versions_path)
+    
+    def write_drafts(self):
+        self._write_csv(self.drafts, self.env.drafts_path)
+    
     def write_config(self):
         with open(self.env.config_path, 'w') as config_file:
             for (k, v) in self.config.items():
                 config_file.write('%s=%s\n' % (k, v.get_value()))
             config_file.close()
+    
+    def bind(self, comment=None, stage=None):
+        num = len(self.versions)+1
+        # Create a temporary filename for the novel.
+        outpath = '%s_%d.%s' % (machine_str(self.title),
+                                num,
+                             self.get_config('chapter.ext'))
+        title = (
+            '<h1 id="title">%s<h1>' % self.title,
+            '<h1 id="by">by</h1>',
+            '<h1 id="author">%s<h1>' % self.author
+            )
+        with open(outpath, "w+") as outfile:
+            for t in title:
+                outfile.write('%s\n' % t)
+            
+            if self.parts and len(self.parts) > 0:
+                for p in self.parts:
+                    p.create_version(outfile)
+            else:
+                for c in self.chapters:
+                    c.create_version(outfile)
+            
+            outfile.close()
+        self.git_add_files([outpath,])
+        self.git_commit_files([outpath,], "Creating version %d" % num)
+        
+        commits = self.git_file_commits(outpath)
+        (git_hash, timestamp) = commits[0]
+        
+        if stage:
+            return Draft(self, stage, git_hash, comment, timestamp)
+        else:
+            return Version(self, git_hash, comment, timestamp)
+    
+    def git_file_commits(self, path):
+        import subprocess
+        git = self.get_config('git.path')
+        CMD = [git, 'log', '--pretty="format:%%H;%%ai', '--', path]
+        print("[shell] %s" % ' '.join(CMD))
+        out = subprocess.check_output(CMD, universal_newlines=True)
+        lines = out.split('\n')
+        commits = []
+        for l in lines:
+            (hsh, tstamp) = l.split(';')
+            timestamp = datetime.datetime.strptime(tstamp, UNIX_DATE_FORMAT)
+            commits = [hsh, timestamp]
+        return commits
     
     def git_add_files(self, paths=[]):
         import subprocess
@@ -311,6 +370,8 @@ class Novel(object):
         Part.from_file(novel)
         Plotline.from_file(novel)
         Chapter.from_file(novel)
+        Version.from_file(novel)
+        Draft.from_file(novel)
         
         return novel
     
@@ -364,6 +425,7 @@ class Plotline(Novelable, Commentable, Taggable):
             for row in pl_reader:
                 p = Plotline(novel, row[0], row[1])
                 novel.plotlines.append(p)
+            plf.close()
     
     def write_row(self, writer):
         writer.writerow([self.tag, self.comment])
@@ -388,6 +450,13 @@ class Part(Novelable, Taggable):
         
         if self.parent:
             self.parent.children.append(self)
+    
+    def create_version(self, outfile, h=2):
+        outfile.write(self.novel.get_config("title_format.part"), self.title)
+        for child in self.children:
+            child.create_version(outfile, h=h+1)
+        for chapter in self.chapters:
+            chapter.create_version(outfile, h=h+1)
     
     @property
     def number(self):
@@ -544,29 +613,68 @@ class Chapter(Taggable):
                 if part is not None:
                     part.chapters.append(chapter)
             chaptersfile.close()
+    
+    def create_version(self, outfile, h=3):
+        ch_title = self.novel.get_config("title_format.chapter") % ({
+            "n" : self.number,
+            "title" : self.title,
+            })
+        outfile.write('<h%d class="chapter">%s</h%d>' % (h, ch_title, h))
+        with open(self.path, 'r') as chapterfile:
+            outfile.write(chapterfile.read())
+            chapterfile.close()
+            outfile.write('\n')
 
 class Version(Taggable, Commentable, Novelable):
     
-    label=None
     novel=None
+    git_hash=None
+    comment=None
     timestamp=None
+    path = None
     
-    def __init__(self, label, git_hash, tag, novel, comment=None,
-        timestamp=None):
-        self.label = label
-        self.get_hash = git_hash
-        self.tag = tag
+    def __init__(self, novel, path, git_hash, comment=None, timestamp=None):
         self.novel = novel
+        self.path = path
+        self.git_hash = git_hash
         self.comment = comment
         self.timestamp = timestamp
+        if not timestamp:
+            self.timestamp = datetime.now()
+    
+    @property
+    def number(self):
+        return self.novel.versions.index(self)+1
+    
+    def write_row(self, writer):
+        writer.writerow([self.path, self.git_hash, self.comment, self.timestamp])
+    
+    @classmethod
+    def from_file(Klass, novel):
+        with open(novel.env.versions_path) as versions_file:
+            v_reader = csv.reader(versions_file)
+            for row in v_reader:
+                v = Version(novel, *row)
+                novel.versions.append(v)
 
-class Draft(Taggable, Commentable):
+class Draft(Version):
     
-    timestamp = None
+    stage = None
     
-    def __init__(self, stage, tag, novel, comment=None, timestamp=None):
+    def __init__(self, novel, path, stage, git_hash, comment=None, timestamp=None):
+        super(Draft, self).__init__(novel, git_hash, comment, timestamp)
         self.stage = stage
-        super(Taggable, self).__init__(tag)
-        super(Commentable, self).__init__(comment)
-        super(Novelable, self).__init__(novel)
-        self.timestamp = timestamp
+    
+    def write_row(self, writer):
+        writer.writerow([self.path, self.stage, self.git_hash, self.comment,
+                         self.timestamp.strftime(UNIX_DATE_FORMAT)])
+    
+    @classmethod
+    def from_file(Klass, novel):
+        with open(novel.env.drafts_path) as drafts_file:
+            drafts_reader = csv.reader(drafts_file)
+            for row in drafts_reader:
+                timestamp = datetime.datetime.strptime(row[-1], UNIX_DATE_FORMAT)
+                draft = Draft(novel, *row[:-2])
+                novel.drafts.append(draft)
+            drafts_file.close()
