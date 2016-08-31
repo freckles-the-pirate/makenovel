@@ -1,7 +1,7 @@
 author.first_name,Your first name,,
 author.last_name,Your last name,,
 author.middle_name,You middle initials or middle name,,
-author.email,Your email address,,
+author.email_address,Your email address,,
 author.street_address,Your street address,,
 author.city,Your city,,
 author.state,The state in which you live,,

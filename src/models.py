@@ -18,7 +18,7 @@ def parse_cfg(path):
     cfg = {}
     with open(path, 'r') as cfg_file:
         for line in cfg_file:
-            if not line[0] != '#':
+            if line[0] != '#':
                 (x,y) = line.strip().split('=')
                 cfg.update({x: y,})
         cfg_file.close()
@@ -73,7 +73,7 @@ class Config(object):
         
         config = Klass.get_ref()
         
-        if config_path is None:
+        if config_path is None or not os.path.exists(config_path):
             config_dir = os.path.expanduser( '~/.makenovel')
             config_path = os.path.join(config_dir, 'makenovel.cfg')
             if not os.path.exists(config_dir):
@@ -84,7 +84,17 @@ class Config(object):
                     for (k,v) in config.items():
                         cfg_file.write('%s=%s\n' % (k, v.get_value()))
                     cfg_file.close()
+                    
+        # Now read the config.
+        raw_cfg = parse_cfg(config_path)
+        for (k,v) in raw_cfg.items():
+            config[k].value = v
+        
         return config
+    
+    def __repr__(self):
+        return "Config(%s, %s)" % (self.thetype.__name__,
+                                   str(self.thetype(self.value)))
 
 class Author(object):
     first_name=None
@@ -123,8 +133,6 @@ class Author(object):
             v = config.get('author.%s' % m)
             if v:
                 values[m] = v.value
-        print("Author values: %s" % values)
-        print("From config: %s" % config)
         return Author(**values)
 
 
@@ -148,8 +156,8 @@ class NovelEnvironment(object):
     
     def __init__(self, projdir=None, config_path=None, last_edit=None, title=None):
         self.last_edit = last_edit
-        self.proj_path = projdir
-        self.config_path = config_path
+        self.proj_path = os.path.abspath(projdir)
+        self.config_path = os.path.abspath(config_path)
         
         self._datafiles = [self.parts_path, self.plotlines_path,
                            self.chapters_path, self.versions_path,
@@ -178,8 +186,17 @@ class NovelEnvironment(object):
                                    " makenovel project."))
         
         envdict = parse_cfg(cfg_path)
-        return NovelEnvironment( path, cfg_path, envdict.get('last_edit'),
+        return NovelEnvironment(path, cfg_path, envdict.get('last_edit'),
                                 envdict.get('title'))
+    
+    def __repr__(self):
+        from pprint import pformat
+        return pformat({
+            'last_edit': self.last_edit,
+            'proj_path' : self.proj_path,
+            'config_path' : self.config_path,
+            'title': self.title,
+            })
 
 class Novel(object):
     title = None
@@ -363,6 +380,8 @@ class Novel(object):
         env = NovelEnvironment.load(path)
         cfg = Config.get_user()
         
+        #from pprint import pformat
+        #print("Config: %s" % pformat(cfg))
         author = Author.from_config(cfg)
         
         novel = Novel(env.title, author, cfg, env)
@@ -489,7 +508,7 @@ class Part(Novelable, Taggable):
         parent_tag = None
         if self.parent:
             parent_tag = self.parent.tag
-        writer.writerow([self.tag, self.title, parent_tag])
+        writer.writerow([self.title, parent_tag])
 
 class Chapter(Taggable):
     
