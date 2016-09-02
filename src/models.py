@@ -64,6 +64,39 @@ class Config(object):
             configsfile.close()
         return configs
     
+    @classmethod
+    def merge_changes(Klass, template_config, config_path):
+        orig_user_config = parse_cfg(config_path)
+        user_config = {}
+        changes = False
+        for (k, v) in orig_user_config.items():
+            if k in template_config:
+                user_config.update({k: v})
+            else:
+                print("[makenovel] config - removed <%s=%s>" % (k,v))
+                changes = True
+        for (k, v) in template_config.items():
+            if k not in user_config:
+                user_config.update({k: str(v.thetype(v.value)) or ''})
+                changes = True
+        
+        if not changes:
+            return
+        
+        # first make a backup
+        n = 0
+        dirname = os.path.dirname(config_path)
+        new_cfg_path = os.path.join(dirname, 'makenovel.cfg.%d.old' % n)
+        while os.path.exists(new_cfg_path):
+            n += 1
+            new_cfg_path = os.path.join(dirname, 'makenovel.cfg.%d.old' % n)
+        print("[shell] current config backed up as '%s'" % new_cfg_path)
+        shutil.copy(config_path, new_cfg_path)
+        
+        # Now overwrite the new changes.
+        with open(config_path, 'w+') as config_file:
+            for (k, v) in user_config.items():
+                config_file.write("%s=%s\n" % (k, v))
     
     @classmethod
     def get_user(Klass, config_path=None):
@@ -86,6 +119,7 @@ class Config(object):
                     cfg_file.close()
                     
         # Now read the config.
+        Klass.merge_changes(config, config_path)
         raw_cfg = parse_cfg(config_path)
         for (k,v) in raw_cfg.items():
             config[k].value = v
@@ -178,15 +212,16 @@ class NovelEnvironment(object):
     @classmethod
     def load(Klass, path=None):
         if not path:
-            path = os.path.dirname('.')
-        cfg_path = os.path.join(path, '.novel', 'novel')
-        if not os.path.exists(cfg_path):
-            raise RuntimeError(str("%s: not a makenovel project. " +
+            path = os.path.abspath(os.path.dirname('.'))
+        novel_path = os.path.abspath(os.path.join(path, '.novel', 'novel'))
+        config_path = os.path.expanduser('~/.makenovel/makenovel.cfg')
+        if not os.path.exists(novel_path):
+            raise RuntimeError(str("%s: not a makenovel project. " % path +
                                    "Please run `mnadmin.py` to create the" +
                                    " makenovel project."))
         
-        envdict = parse_cfg(cfg_path)
-        return NovelEnvironment(path, cfg_path, envdict.get('last_edit'),
+        envdict = parse_cfg(novel_path)
+        return NovelEnvironment(path, config_path, envdict.get('last_edit'),
                                 envdict.get('title'))
     
     def __repr__(self):
@@ -217,9 +252,11 @@ class Novel(object):
         self.env = env
     
     def set_config(self, key, value, create=False):
-        if create and key not in self.config:
-            self.config.update({key: Config("[user]", None)})
+        #if create and key not in self.config:
+        #self.config.update({key: Config("[user]", None)})
         self.config[key].value = value
+        print("[makenovel] config - %s=%s" % (key, self.get_config(key)))
+        self.write_config()
                 
     def get_config(self, key):
         if key is None:
@@ -282,10 +319,10 @@ class Novel(object):
         self._write_csv(self.drafts, self.env.drafts_path)
     
     def write_config(self):
-        with open(self.env.config_path, 'w') as config_file:
+        with open(self.env.config_path, 'w') as cfg_file:
             for (k, v) in self.config.items():
-                config_file.write('%s=%s\n' % (k, v.get_value()))
-            config_file.close()
+                cfg_file.write('%s=%s\n' % (k, v.get_value()))
+            cfg_file.close()
     
     def bind(self, comment=None, stage=None):
         num = len(self.versions)+1
@@ -317,22 +354,34 @@ class Novel(object):
         (git_hash, timestamp) = commits[0]
         
         if stage:
-            return Draft(self, stage, git_hash, comment, timestamp)
+            draft = Draft(self, outpath, stage, git_hash, comment, timestamp)
+            self.drafts.append(draft)
+            self.write_drafts()
+            self.git_commit_files([self.env.drafts_path,],
+                                  "Create draft %s" % draft.stage)
+            return draft
         else:
-            return Version(self, git_hash, comment, timestamp)
+            version = Version(self, outpath, git_hash, comment, timestamp)
+            self.versions.append(version)
+            self.write_versions()
+            self.git_commit_files([self.env.versions_path,],
+                                  "Create version %s" % version.number)
+            return version
     
     def git_file_commits(self, path):
         import subprocess
         git = self.get_config('git.path')
-        CMD = [git, 'log', '--pretty="format:%%H;%%ai', '--', path]
+        CMD = [git, 'log', '--pretty="format:%H;%ai"', '--', path]
         print("[shell] %s" % ' '.join(CMD))
         out = subprocess.check_output(CMD, universal_newlines=True)
         lines = out.split('\n')
         commits = []
         for l in lines:
-            (hsh, tstamp) = l.split(';')
-            timestamp = datetime.datetime.strptime(tstamp, UNIX_DATE_FORMAT)
-            commits = [hsh, timestamp]
+            if len(l) > 0:
+                l = l.strip('"')
+                (hsh, tstamp) = l.split(';')
+                timestamp = datetime.datetime.strptime(tstamp, UNIX_DATE_FORMAT)
+                commits.append([hsh, timestamp])
         return commits
     
     def git_add_files(self, paths=[]):
@@ -471,7 +520,11 @@ class Part(Novelable, Taggable):
             self.parent.children.append(self)
     
     def create_version(self, outfile, h=2):
-        outfile.write(self.novel.get_config("title_format.part"), self.title)
+        fmt = self.novel.get_config("title_format.part")
+        outfile.write(fmt % {
+            'title': self.title,
+            'number': self.number,}
+        )
         for child in self.children:
             child.create_version(outfile, h=h+1)
         for chapter in self.chapters:
@@ -509,6 +562,11 @@ class Part(Novelable, Taggable):
         if self.parent:
             parent_tag = self.parent.tag
         writer.writerow([self.title, parent_tag])
+    
+    def __repr__(self):
+        if self.title:
+            return 'Part %d: %s' % (self.number, self.title)
+        return 'Part %d'
 
 class Chapter(Taggable):
     
@@ -548,9 +606,7 @@ class Chapter(Taggable):
             self.tag = '%d__%s' % (self.number, ttl)
                 
         if self.path is None or old_tag != self.tag:
-            filename = '%s.%s' % (self.tag,
-                                  self.novel.config.get(
-                                      'chapter.ext', 'rst'))
+            filename = '%s.%s' % (self.tag, self.novel.get_config('chapter.ext'))
             if self.plotline is not None:
                 pre = os.path.join(self.novel.env.proj_path, self.plotline.tag)
             else:
@@ -634,11 +690,14 @@ class Chapter(Taggable):
             chaptersfile.close()
     
     def create_version(self, outfile, h=3):
-        ch_title = self.novel.get_config("title_format.chapter") % ({
-            "n" : self.number,
-            "title" : self.title,
-            })
-        outfile.write('<h%d class="chapter">%s</h%d>' % (h, ch_title, h))
+        format_str = self.novel.get_config("title_format.chapter")
+        format_vars = {}
+        if '%(number)' in format_str:
+            format_vars.update({'number': self.number,})
+        if '%(title)' in format_str:
+            format_vars.update({'title': self.title,})
+        ch_title =  format_str % format_vars
+        outfile.write('<h%d class="chapter">%s</h%d>\n' % (h, ch_title, h))
         with open(self.path, 'r') as chapterfile:
             outfile.write(chapterfile.read())
             chapterfile.close()
@@ -650,7 +709,7 @@ class Version(Taggable, Commentable, Novelable):
     git_hash=None
     comment=None
     timestamp=None
-    path = None
+    path=None
     
     def __init__(self, novel, path, git_hash, comment=None, timestamp=None):
         self.novel = novel
@@ -659,7 +718,7 @@ class Version(Taggable, Commentable, Novelable):
         self.comment = comment
         self.timestamp = timestamp
         if not timestamp:
-            self.timestamp = datetime.now()
+            self.timestamp = datetime.datetime.now()
     
     @property
     def number(self):
@@ -675,6 +734,7 @@ class Version(Taggable, Commentable, Novelable):
             for row in v_reader:
                 v = Version(novel, *row)
                 novel.versions.append(v)
+            versions_file.close()
 
 class Draft(Version):
     

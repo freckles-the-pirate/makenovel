@@ -260,7 +260,8 @@ def list_chapters(novel):
             print("- %s" % i)
 
 def list_versions(novel):
-    pass
+    for v in novel.versions:
+        print("%-5d%20s%50s" % (v.number, v.timestamp, os.path.abspath(v.path)))
 
 def list_drafts(novel):
     pass
@@ -553,7 +554,24 @@ def delete_plotline(novel, tag, force):
     pass
 
 def delete_part(novel, tag, force):
-    pass
+    
+    part = novel.find_part(tag)
+    if not part:
+        print("%s: part not found" % tag)
+        sys.exit(1)
+    
+    if not force:
+        do_force = input("Are you sure you want to delete %s (y/n)? " % part)
+        f = do_force.lower()[0]
+        if f == 'n':
+            sys.exit(0)
+        delete_part(novel, tag, f == 'y')
+    
+    removed_title = str(part)
+    
+    removed = novel.parts.pop(novel.parts.index(part))
+    novel.write_parts()
+    novel.git_commit_files([novel.env.parts_path,], "Remove tag %s" % removed)
 
 def delete_chapter(novel, tag, force):
     chapter = novel.find_chapter(tag)
@@ -664,7 +682,7 @@ Use `mnadmin' to create the novel project. Thank you.")
     
     if getattr(args, 'which', '') == 'config':
         parsed = parser_config.parse_args(argv[2:])
-        sett = getattr(parsed, 'set', None)
+        value = getattr(parsed, 'set', None)
         get = getattr(parsed, 'get', None)
         dflt = getattr(parsed, 'default', False)
         key = getattr(parsed, 'key', None)
@@ -676,8 +694,8 @@ Use `mnadmin' to create the novel project. Thank you.")
         if lst:
             for c in novel.config.keys():
                 print(c)
-        elif sett:
-            novel.set_config(key, sett)
+        elif value is not None:
+            novel.set_config(key, value)
             novel.write_config()
         elif dflt:
             dflt = novel.config[parsed.key].default
