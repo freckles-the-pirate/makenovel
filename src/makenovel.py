@@ -218,6 +218,18 @@ chapter_import_order.add_argument('-a', '--after', nargs=1,
     metavar='CHAPTER',
     help='update this chapter after `CHAPTER`')
 
+def ask_to_delete(obj, force=False):
+    if not force:
+        f = ''
+        while f.lower() not in ('y', 'n'):
+            f = input("Are you sure you want to delete '%s' (y/n)? " % obj)
+            if f == 'y':
+                return True
+            else:
+                print("%s not deleted." % obj)
+                sys.exit(0)
+    return True
+
 # list
 
 def list_plotlines(novel):
@@ -260,11 +272,19 @@ def list_chapters(novel):
             print("- %s" % i)
 
 def list_versions(novel):
+    if len(novel.versions) == 0:
+        print("No versions found.")
+        sys.exit(0)
     for v in novel.versions:
         print("%-5d%20s%50s" % (v.number, v.timestamp, os.path.abspath(v.path)))
 
 def list_drafts(novel):
-    pass
+    if len(novel.drafts) == 0:
+        print("No drafts found.")
+        sys.exit(0)
+    for d in novel.drafts:
+        print("[%-5d]%-10s%20s%50s" % (d.number, d.stage, d.timestamp,
+                                       os.path.abspath(d.path)))
 
 # show
 
@@ -560,12 +580,8 @@ def delete_part(novel, tag, force):
         print("%s: part not found" % tag)
         sys.exit(1)
     
-    if not force:
-        do_force = input("Are you sure you want to delete %s (y/n)? " % part)
-        f = do_force.lower()[0]
-        if f == 'n':
-            sys.exit(0)
-        delete_part(novel, tag, f == 'y')
+    if not ask_to_delete(part, force):
+        return
     
     removed_title = str(part)
     
@@ -579,15 +595,8 @@ def delete_chapter(novel, tag, force):
         print("%s: Invalid chapter tag" % tag)
         sys.exit(1)
         
-    if not force:
-        f = ''
-        while f.lower() not in ('y', 'n'):
-            f = input("Are you sure you want to delete '%s' (y/n)? " % chapter)
-            if f == 'y':
-                delete_chapter(novel, tag, True)
-            else:
-                print("%s not deleted." % chapter)
-                sys.exit(0)
+    if not ask_to_delete(chapter, force):
+        return
     
     os.remove(chapter.path)
     novel.chapters.remove(chapter)
@@ -599,7 +608,16 @@ def delete_chapter(novel, tag, force):
         chaptersfile.close()
 
 def delete_version(novel, tag, force):
-    pass
+    version = novel.find_version(tag)
+    if not version:
+        raise RuntimeError("%s: version not found" % tag)
+    
+    if not ask_to_delete(version):
+        return
+    
+    novel.versions.remove(version)
+    novel.write_versions()
+    novel.git_commit_files([novel.env.versions_path,], "Remove %s" % version)
 
 def delete_draft(novel, tag, force):
     pass
