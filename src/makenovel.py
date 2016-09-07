@@ -345,6 +345,28 @@ def add_plotline(novel, tag, description):
     novel.write_plotlines()
 
 def add_part(novel, title=None, before_tag=None, after_tag=None, parent_tag=None):
+    """
+    @brief Add a part to a novel
+    
+    :param novel: Current novel we're editing.
+    :type novel: Novel
+    
+    :param title: Optional title of this part.
+    :type title: str
+    
+    :param before_tag: If specified, the new part will be placed
+        <emph>after</emph> the part with this tag.
+    :type before_tag: str
+    
+    :param after_tag: If specified, the new part will be placed
+        <emph>after</emph> the part with this tag.
+    :type after_tag: str
+    
+    :param parent_tag: If specified, the new part will be a child of the part
+        specified by this tag.
+    
+    :returns: None
+    """
     # First check if the tags are valid
     (before, after, parent) = (None, None, None)
     if before_tag is not None:
@@ -401,8 +423,15 @@ def add_chapter(novel, plotline_tag, title, part_tag):
 
 # update
 
-def update_part(novel, tag, title, before_tag, after_tag, parent_tag):
+def update_part(novel, tag, **kwargs):
+    title = kwargs.pop('title', None)
+    before_tag = kwargs.pop('before_tag', None)
+    after_tag = kwargs.pop('after_tag', None)
+    parent_tag = kwargs.pop('parent_tag', None)
+    
+    
     part = novel.find_part(tag)
+    
     if part is None:
         print("%s: part not found" % tag)
         sys.exit(1)

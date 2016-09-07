@@ -37,7 +37,7 @@ class TestNovel(unittest.TestCase):
         title = "Test Novel"
         author = Author("John", "Smith")
         
-        env = NovelEnvironment(projdir = self.proj_path)
+        env = NovelEnvironment.load(self.proj_path)
         
         self.novel = Novel(title, author, config, env)
         self.novel.parts = [Part(self.novel), Part(self.novel),]
@@ -70,6 +70,10 @@ class TestNovel(unittest.TestCase):
         show_part(self.novel, "1")
         show_plotline(self.novel, "main")
     
+    """
+    " Add
+    """
+    
     def testAddPlotline(self):
         self.assertEqual(len(self.novel.plotlines), 2)
         with open(self.novel.env.plotlines_path) as plf:
@@ -93,6 +97,20 @@ class TestNovel(unittest.TestCase):
         self.assertIsNotNone(self.novel.find_chapter("1__first_test_chapter"))
         part = self.novel.find_part("1")
         self.assertIn(self.novel.chapters[0], part.chapters)
+    
+    """
+    " Update
+    """
+    
+    def test_update_part(self):
+        add_part(self.novel, "Part 1 Original")
+        add_part(self.novel, "Part 2 Original")
+        self.assertEqual(len(self.novel.parts), 2)
+        update_part(self.novel, "1__part_1_original", title="Part 1 Modified")
+        self.assertEqual(self.novel.parts[0].title == "Part 1 Modified")
+        update_part(self.novel, "2__part_2_original", before="1__part_1_modified")
+        self.assertEqual(self.novel.parts[0], self.novel.find_part("2__part_2_original"))
+        self.assertEqual(self.novel.parts[1], self.novel.find_part("1__part_1_modified"))
     
     def tearDown(self):
         os.chdir(os.path.abspath(os.path.join(self.proj_path, '..')))
