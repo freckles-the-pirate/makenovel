@@ -274,14 +274,14 @@ def list_chapters(novel):
 def list_versions(novel):
     if len(novel.versions) == 0:
         print("No versions found.")
-        sys.exit(0)
+        return
     for v in novel.versions:
         print("%-5d%20s%50s" % (v.number, v.timestamp, os.path.abspath(v.path)))
 
 def list_drafts(novel):
     if len(novel.drafts) == 0:
         print("No drafts found.")
-        sys.exit(0)
+        return
     for d in novel.drafts:
         print("[%-5d]%-10s%20s%50s" % (d.number, d.stage, d.timestamp,
                                        os.path.abspath(d.path)))
@@ -392,7 +392,8 @@ def add_part(novel, title=None, before_tag=None, after_tag=None, parent_tag=None
         novel.parts.append(part)
         
     novel.write_parts()
-    novel.git_commit_data(novel.env.parts_path)
+    novel.git_add_files([novel.env.parts_path,])
+    novel.git_commit_files([novel.env.parts_path,])
 
 def add_chapter(novel, plotline_tag, title, part_tag):
     
@@ -463,15 +464,10 @@ def update_part(novel, tag, **kwargs):
         i1 = novel.parts.index(part)
         i2 = novel.parts.index(before)+1
         novel.parts.insert(novel.parts.pop(i1), i2)
-    
-    with open(PARTSFILE, 'w') as partsfile:
-        writer = csv.writer(partsfile)
-        for p in novel.parts:
-            p.write_row(writer)
-        partsfile.close()
-    
+        
     novel.write_parts()
-    novel.git_commit_data(Novel.PARTSFILE, "Update part %s" % part)
+    novel.git_add_files([novel.env.parts_path,])
+    novel.git_commit_files([novel.env.parts_path,], "Update '%s'" % part)
 
 def update_plotline(novel, tag, new_tag, description):
     plotline = novel.find_plotline(tag)

@@ -103,11 +103,12 @@ class TestNovel(unittest.TestCase):
     """
     
     def test_update_part(self):
+        self.novel.parts = []
         add_part(self.novel, "Part 1 Original")
         add_part(self.novel, "Part 2 Original")
         self.assertEqual(len(self.novel.parts), 2)
         update_part(self.novel, "1__part_1_original", title="Part 1 Modified")
-        self.assertEqual(self.novel.parts[0].title == "Part 1 Modified")
+        self.assertEqual(self.novel.parts[0].title, "Part 1 Modified")
         update_part(self.novel, "2__part_2_original", before="1__part_1_modified")
         self.assertEqual(self.novel.parts[0], self.novel.find_part("2__part_2_original"))
         self.assertEqual(self.novel.parts[1], self.novel.find_part("1__part_1_modified"))

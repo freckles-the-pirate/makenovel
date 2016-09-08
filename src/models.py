@@ -386,6 +386,10 @@ class Novel(object):
     
     def git_add_files(self, paths=[]):
         import subprocess
+        
+        curr_dir = os.path.abspath(os.path.dirname('.'))
+        os.chdir(self.env.proj_path)
+        
         if not issubclass(type(paths), list):
             raise TypeError("`paths` must be a list.")
         for i in paths:
@@ -398,18 +402,26 @@ class Novel(object):
             print("[shell] %s" % (" ".join(CMD)))
             return subprocess.call(CMD)
         
+        os.chdir(curr_dir)
+        
     def git_commit_files(self, paths=[], message=None):
         import subprocess
+        
+        curr_dir = os.path.abspath(os.path.dirname('.'))
+        os.chdir(self.env.proj_path)
+        
         for p in paths:
             if not os.path.exists(p):
                 raise RuntimeError("%s: path not found" % p)
         
         git_cmd = self.get_config('git.path')
-        CMD=[git_cmd, 'commit']
+        CMD=[git_cmd, 'commit', '-am', '"[autocommit]"']
         if message:
-            CMD.extend(['-am', '"%s"' % message])
+            CMD = [git_cmd, 'commit', '-am', '"%s"' % message]
         print("[shell] %s" % (" ".join(CMD)))
         return subprocess.call(CMD)
+    
+        os.chdir(curr_dir)
     
     def git_commit_data(self, datafile, message=None):
         self.git_commit_files([datafile,], message)
