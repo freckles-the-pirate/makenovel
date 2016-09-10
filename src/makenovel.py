@@ -425,17 +425,40 @@ def add_chapter(novel, plotline_tag, title, part_tag):
 # update
 
 def update_part(novel, tag, **kwargs):
+    """
+    @brief Update a part's title, place under a different parent, or reorder
+        the part.
+    
+    :param novel: Novel we're editing.
+    :type novel: Novel
+    
+    :param tag: Tag of the part to find
+    :type tag: str
+    
+    :param title: New title of the part.
+    :type title: str
+    
+    :param before_tag: Tag of the part to place *after* the updated part.
+    :type before_tag: str
+    
+    :param after_tag: Tag of the part to place *before* the updated part.
+    :type after_tag: str
+    
+    :param parent_tag: Tag of the part to use as the parent.
+    :type parent_tag: str
+    
+    :raises: RuntimeError if a part for any of the tags is not found.
+    
+    """
     title = kwargs.pop('title', None)
     before_tag = kwargs.pop('before_tag', None)
     after_tag = kwargs.pop('after_tag', None)
     parent_tag = kwargs.pop('parent_tag', None)
     
-    
     part = novel.find_part(tag)
     
     if part is None:
-        print("%s: part not found" % tag)
-        sys.exit(1)
+        raise RuntimeError("%s: part not found" % tag)
         
     if title:
         part.title = title
@@ -454,7 +477,8 @@ def update_part(novel, tag, **kwargs):
             sys.exit(1)
         i1 = novel.parts.index(part)
         i2 = novel.parts.index(before)
-        novel.parts.insert(novel.parts.pop(i1), i2)
+        print("[part] placing before [%s] %s" % (i2, before))
+        novel.parts.insert(i2, novel.parts.pop(i1))
         
     if after_tag:
         after = novel.find_part(after_tag)
@@ -463,7 +487,7 @@ def update_part(novel, tag, **kwargs):
             sys.exit(1)
         i1 = novel.parts.index(part)
         i2 = novel.parts.index(before)+1
-        novel.parts.insert(novel.parts.pop(i1), i2)
+        novel.parts.insert(i2, novel.parts.pop(i1))
         
     novel.write_parts()
     novel.git_add_files([novel.env.parts_path,])
@@ -833,7 +857,9 @@ Use `mnadmin' to create the novel project. Thank you.")
         if args.which == 'update_plotline':
             update_plotline(novel, tag, new_tag, description)
         elif args.which == 'update_part':
-            update_part(novel, tag, title, before, after, parent)
+            update_part(novel=novel, tag=tag, title=title,
+                        before_tag=before, after_tag=after,
+                        parent_tag=parent)
         elif args.which == 'update_chapter':
             update_chapter(novel, tag, plotline, title, part, before, after)
         elif args.which == 'update_version':

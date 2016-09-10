@@ -107,11 +107,19 @@ class TestNovel(unittest.TestCase):
         add_part(self.novel, "Part 1 Original")
         add_part(self.novel, "Part 2 Original")
         self.assertEqual(len(self.novel.parts), 2)
-        update_part(self.novel, "1__part_1_original", title="Part 1 Modified")
+        
+        p2 = self.novel.find_part("2__part_2_original")
+        p1 = self.novel.find_part("1__part_1_original")
+        
+        update_part(self.novel, tag="1__part_1_original", title="Part 1 Modified")
         self.assertEqual(self.novel.parts[0].title, "Part 1 Modified")
-        update_part(self.novel, "2__part_2_original", before="1__part_1_modified")
-        self.assertEqual(self.novel.parts[0], self.novel.find_part("2__part_2_original"))
-        self.assertEqual(self.novel.parts[1], self.novel.find_part("1__part_1_modified"))
+        update_part(self.novel, "2__part_2_original", before_tag="1__part_1_modified")
+        self.assertEqual(self.novel.parts[0], p2)
+        self.assertEqual(self.novel.parts[1], p1)
+        
+        # The titles and tags must be different, though.
+        self.assertEqual(self.novel.parts[0].tag, "1__part_2_original")
+        self.assertEqual(self.novel.parts[1].tag, "2__part_1_modified")
     
     def tearDown(self):
         os.chdir(os.path.abspath(os.path.join(self.proj_path, '..')))

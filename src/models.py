@@ -5,6 +5,10 @@ import sys
 import csv
 import shutil
 import datetime
+import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 UNIX_DATE_FORMAT="%Y-%m-%d %H:%M:%S %z"
 
