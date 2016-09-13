@@ -399,12 +399,10 @@ def add_chapter(novel, plotline_tag, title, part_tag):
     
     plotline = novel.find_plotline(plotline_tag)
     if plotline is None:
-        print("%s: plotline not found" % plotline_tag)
-        sys.exit(1)
+        raise RuntimeError("%s: plotline not found" % plotline_tag)
     part = novel.find_part(part_tag)
     if part is None:
-        print("%s: part not found" % part_tag)
-        sys.exit(1)
+        raise RuntimeError("%s: part not found" % part_tag)
     
     i = len(novel.chapters)+1
     c = Chapter(plotline=plotline, novel=novel, title=title, part=part, number=i)
@@ -450,10 +448,10 @@ def update_part(novel, tag, **kwargs):
     :raises: RuntimeError if a part for any of the tags is not found.
     
     """
-    title = kwargs.pop('title', None)
-    before_tag = kwargs.pop('before_tag', None)
-    after_tag = kwargs.pop('after_tag', None)
-    parent_tag = kwargs.pop('parent_tag', None)
+    title = kwargs.pop('title')
+    before_tag = kwargs.pop('before_tag')
+    after_tag = kwargs.pop('after_tag')
+    parent_tag = kwargs.pop('parent_tag')
     
     part = novel.find_part(tag)
     
@@ -509,8 +507,12 @@ def update_plotline(novel, tag, new_tag, description):
     novel.write_plotlines()
     novel.git_commit_data(Novel.PARTSFILE, "Update plotline %s" % plotline)
 
-def update_chapter(novel, tag, plotline_tag, title, part_tag,
-                   before_tag, after_tag):
+def update_chapter(novel, tag, **kwargs):
+    plotline_tag = kwargs.pop('plotline_tag')
+    title = kwargs.pop('title')
+    part_tag = kwargs.pop('part_tag')
+    before_tag = kwargs.pop('before_tag')
+    after_tag = kwargs.pop('after_tag')
     (plotline, part, before, after) = (None, )*4
     
     chapter = novel.find_chapter(tag)
@@ -540,15 +542,15 @@ def update_chapter(novel, tag, plotline_tag, title, part_tag,
     if part_tag:
         part = novel.find_part(part_tag)
         if part is None:
-            print("%s: part not found" % part_tag)
-            sys.exit(1)
+            raise RuntimeError("%s: part not found" % part_tag)
         old_part = chapter.part
-        chapter.part = part
+        print("[add_part] Adding %s => %s" % (chapter, part))
         part.chapters.append(
-            old_part.pop(
-                old_part.index(chapter)
+            old_part.chapters.parts.pop(
+                old_part.chapters.index(chapter)
             )
         )
+        chapter.part = part
     
     if before_tag:
         before = novel.find_chapter(before_tag)

@@ -582,7 +582,7 @@ class Part(Novelable, Taggable):
     def __repr__(self):
         if self.title:
             return 'Part %d: %s' % (self.number, self.title)
-        return 'Part %d'
+        return 'Part %d' % self.number
 
 class Chapter(Taggable):
     

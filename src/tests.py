@@ -103,23 +103,49 @@ class TestNovel(unittest.TestCase):
     """
     
     def test_update_part(self):
-        self.novel.parts = []
         add_part(self.novel, "Part 1 Original")
         add_part(self.novel, "Part 2 Original")
-        self.assertEqual(len(self.novel.parts), 2)
+        self.assertEqual(len(self.novel.parts), 4)
         
-        p2 = self.novel.find_part("2__part_2_original")
-        p1 = self.novel.find_part("1__part_1_original")
+        p2 = self.novel.find_part("3__part_2_original")
+        p1 = self.novel.find_part("4__part_1_original")
         
-        update_part(self.novel, tag="1__part_1_original", title="Part 1 Modified")
+        update_part(self.novel, tag="3__part_1_original", title="Part 1 Modified")
         self.assertEqual(self.novel.parts[0].title, "Part 1 Modified")
-        update_part(self.novel, "2__part_2_original", before_tag="1__part_1_modified")
+        update_part(self.novel, "4__part_2_original", before_tag="1__part_1_modified")
         self.assertEqual(self.novel.parts[0], p2)
         self.assertEqual(self.novel.parts[1], p1)
         
         # The titles and tags must be different, though.
-        self.assertEqual(self.novel.parts[0].tag, "1__part_2_original")
-        self.assertEqual(self.novel.parts[1].tag, "2__part_1_modified")
+        self.assertEqual(self.novel.parts[0].tag, "3__part_2_original")
+        self.assertEqual(self.novel.parts[1].tag, "4__part_1_modified")
+        self.assertEqual(self.novel.parts[0].tag, "3__part_2_original")
+        self.assertEqual(self.novel.parts[1].tag, "4__part_1_modified")
+    
+    def testUpdateChapters(self):
+        add_part(self.novel)
+        add_part(self.novel)
+        t = self.novel.parts[-2].tag
+        add_chapter(self.novel, "main", title="AAA", part_tag=t)
+        add_chapter(self.novel, "main", title="BBB", part_tag=t)
+        
+        #self.novel.load(self.proj_path)
+        
+        p1 = self.novel.parts[-2]
+        p2 = self.novel.parts[-1]
+        parts = self.novel.parts
+        for p in parts:
+            print(">> %s: %s" % (p, p.chapters))
+        self.assertEqual(len(p1.chapters), 3)
+        self.assertEqual(len(p2.chapters), 0)
+        
+        update_chapter(self.novel, "1__aaa", title="CCC")
+        update_chapter(self.novel, "2__bbb", title="DDD", part_tag='2')
+        
+        self.assertEqual(self.novel.parts[0].children, 1)
+        self.assertEqual(self.novel.parts[1].children, 2)
+        self.assertEqual(self.novel.chapters[0].tag, "1__ccc")
+        self.assertEqual(self.novel.chapters[1].tag, "1__ddd")
     
     def tearDown(self):
         os.chdir(os.path.abspath(os.path.join(self.proj_path, '..')))
