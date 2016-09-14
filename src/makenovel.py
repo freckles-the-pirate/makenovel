@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 
+import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
 import sys
 import os
 import argparse
@@ -397,28 +402,32 @@ def add_part(novel, title=None, before_tag=None, after_tag=None, parent_tag=None
 
 def add_chapter(novel, plotline_tag, title, part_tag):
     
-    plotline = novel.find_plotline(plotline_tag)
-    if plotline is None:
-        raise RuntimeError("%s: plotline not found" % plotline_tag)
-    part = novel.find_part(part_tag)
-    if part is None:
-        raise RuntimeError("%s: part not found" % part_tag)
+    (part, plotline) = (None,)*2
+    if plotline_tag:
+        plotline = novel.find_plotline(plotline_tag)
+        if plotline is None:
+            raise RuntimeError("%s: plotline not found" % plotline_tag)
+    
+    if part_tag:
+        part = novel.find_part(part_tag)
+        if part is None:
+            raise RuntimeError("%s: part not found" % part_tag)
     
     i = len(novel.chapters)+1
-    c = Chapter(plotline=plotline, novel=novel, title=title, part=part, number=i)
+    c = Chapter(novel=novel, plotline=plotline, title=title, part=part, number=i)
     novel.chapters.append(c)
     if part:
         part.chapters.append(c)
+    plotline.chapters.append(c)
     
     # First create the plotline directory if it doesn't exist.
     if not os.path.exists(os.path.dirname(c.path)):
         os.makedirs(os.path.dirname(c.path))
     if not os.path.exists(c.path):
         open(c.path, 'w+').close()
+        
     novel.write_chapters()
-    
-    novel.git_commit_files([c.path])
-    novel.git_commit_data(novel.env.chapters_path, "Add %s" % c)
+    novel.git_commit_files([c.path, novel.env.chapters_path], "Add %s" % c)
 
 # update
 
@@ -448,10 +457,10 @@ def update_part(novel, tag, **kwargs):
     :raises: RuntimeError if a part for any of the tags is not found.
     
     """
-    title = kwargs.pop('title')
-    before_tag = kwargs.pop('before_tag')
-    after_tag = kwargs.pop('after_tag')
-    parent_tag = kwargs.pop('parent_tag')
+    title = kwargs.pop('title', None)
+    before_tag = kwargs.pop('before_tag', None)
+    after_tag = kwargs.pop('after_tag', None)
+    parent_tag = kwargs.pop('parent_tag', None)
     
     part = novel.find_part(tag)
     
@@ -517,8 +526,7 @@ def update_chapter(novel, tag, **kwargs):
     
     chapter = novel.find_chapter(tag)
     if chapter is None:
-        print("%s: chapter not found" % tag)
-        sys.exit(1)
+        raise RuntimeError("%s: chapter not found" % tag)
     
     # The tag will be overwritten, so save it, just in case.
     old_tag = chapter.tag
@@ -529,8 +537,7 @@ def update_chapter(novel, tag, **kwargs):
     if plotline_tag:
         plotline = novel.find_plotline(plotline_tag)
         if plotline is None:
-            print("%s: plotline not found" % plotline_tag)
-            sys.exit(1)
+            raise RuntimeError("%s: plotline not found" % plotline_tag)
         old_plotline = chapter.plotline
         chapter.plotline = plotline
         plotline.chapters.append(
@@ -544,7 +551,7 @@ def update_chapter(novel, tag, **kwargs):
         if part is None:
             raise RuntimeError("%s: part not found" % part_tag)
         old_part = chapter.part
-        print("[add_part] Adding %s => %s" % (chapter, part))
+        logger.debug("part_tag: %s => %s" % (chapter, part))
         part.chapters.append(
             old_part.chapters.parts.pop(
                 old_part.chapters.index(chapter)
@@ -555,8 +562,8 @@ def update_chapter(novel, tag, **kwargs):
     if before_tag:
         before = novel.find_chapter(before_tag)
         if before is None:
-            print("%s: chapter not found" % before)
-            sys.exit(1)
+            raise RuntimeError("%s: chapter not found" % before)
+        logger.debug("before_tag: %s => %s" % (chapter, before))
         
         novel.chapters.insert(
             novel.chapters.index(chapter),
@@ -566,8 +573,7 @@ def update_chapter(novel, tag, **kwargs):
     elif after_tag:
         after = novel.find_chapter(after_tag)
         if after is None:
-            print("%s: chapter not found" % after)
-            sys.exit(1)
+            raise RuntimeError("%s: chapter not found" % after)
         
         novel.chapters.insert(
             novel.chapters.index(chapter)+1,

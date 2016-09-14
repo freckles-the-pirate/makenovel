@@ -8,7 +8,6 @@ import datetime
 import logging
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 UNIX_DATE_FORMAT="%Y-%m-%d %H:%M:%S %z"
 
@@ -77,7 +76,7 @@ class Config(object):
             if k in template_config:
                 user_config.update({k: v})
             else:
-                print("[makenovel] config - removed <%s=%s>" % (k,v))
+                logger.info("config - removed <%s=%s>" % (k,v))
                 changes = True
         for (k, v) in template_config.items():
             if k not in user_config:
@@ -94,7 +93,7 @@ class Config(object):
         while os.path.exists(new_cfg_path):
             n += 1
             new_cfg_path = os.path.join(dirname, 'makenovel.cfg.%d.old' % n)
-        print("[shell] current config backed up as '%s'" % new_cfg_path)
+        logger.info("current config backed up as '%s'" % new_cfg_path)
         shutil.copy(config_path, new_cfg_path)
         
         # Now overwrite the new changes.
@@ -116,7 +115,7 @@ class Config(object):
             if not os.path.exists(config_dir):
                 os.makedirs(config_dir)
             if not os.path.exists(config_path):
-                print("[makenovel] creating config file '%s'" % config_path)
+                logger.info("creating config file '%s'" % config_path)
                 with open(config_path, 'w') as cfg_file:
                     for (k,v) in config.items():
                         cfg_file.write('%s=%s\n' % (k, v.get_value()))
@@ -259,7 +258,7 @@ class Novel(object):
         #if create and key not in self.config:
         #self.config.update({key: Config("[user]", None)})
         self.config[key].value = value
-        print("[makenovel] config - %s=%s" % (key, self.get_config(key)))
+        logger.debug("config %s=%s" % (key, self.get_config(key)))
         self.write_config()
                 
     def get_config(self, key):
@@ -376,7 +375,7 @@ class Novel(object):
         import subprocess
         git = self.get_config('git.path')
         CMD = [git, 'log', '--pretty="format:%H;%ai"', '--', path]
-        print("[shell] %s" % ' '.join(CMD))
+        logger.info("[shell] %s" % ' '.join(CMD))
         out = subprocess.check_output(CMD, universal_newlines=True)
         lines = out.split('\n')
         commits = []
@@ -403,7 +402,7 @@ class Novel(object):
         git_cmd = self.get_config('git.path')
         for p in paths:
             CMD=[git_cmd, 'add', p]
-            print("[shell] %s" % (" ".join(CMD)))
+            logger.info("[shell] %s" % (" ".join(CMD)))
             return subprocess.call(CMD)
         
         os.chdir(curr_dir)
@@ -422,7 +421,7 @@ class Novel(object):
         CMD=[git_cmd, 'commit', '-am', '"[autocommit]"']
         if message:
             CMD = [git_cmd, 'commit', '-am', '"%s"' % message]
-        print("[shell] %s" % (" ".join(CMD)))
+        logger.info("[shell] %s" % (" ".join(CMD)))
         return subprocess.call(CMD)
     
         os.chdir(curr_dir)
@@ -531,7 +530,6 @@ class Part(Novelable, Taggable):
         self.title = title
         self.parent = parent
         
-        
         if self.parent:
             self.parent.children.append(self)
     
@@ -584,7 +582,7 @@ class Part(Novelable, Taggable):
             return 'Part %d: %s' % (self.number, self.title)
         return 'Part %d' % self.number
 
-class Chapter(Taggable):
+class Chapter(Novelable, Taggable):
     
     path = None
     title = None
@@ -593,7 +591,7 @@ class Chapter(Taggable):
     part = None
     number = 0
     
-    def __init__(self, plotline, novel, title=None, part=None,
+    def __init__(self, novel, plotline, title=None, part=None,
                  number=0, tag=None, path=None):
 
         self.tag = tag
@@ -639,7 +637,7 @@ class Chapter(Taggable):
             return
         
         shutil.copy(old_path, self.path)
-        print("[shell] cp %s %s" % (old_path, self.path))
+        logger.info("[shell] cp %s %s" % (old_path, self.path))
 
     def word_count(self):
         count = 0
@@ -677,31 +675,30 @@ class Chapter(Taggable):
             ch_reader = csv.reader(chaptersfile)
             for row in ch_reader:
                 (path, plotline_tag, part_tag, title) = row
+                (part, plotline) = (None,)*2
                 
-                part = None
                 if part_tag is not None:
-                    for p in novel.parts:
-                        if part_tag == p.tag:
-                            part = p
+                    part = novel.find_part(part_tag)
+                    if part is None:
+                        raise RuntimeError("%s: part not found" % part_tag)
                             
-                plotline = None
                 if plotline_tag is not None:
-                    for pl in novel.plotlines:
-                        if pl.tag == plotline_tag:
-                            plotline = pl
+                    plotline = novel.find_plotline(plotline_tag)
+                    if plotline is None:
+                        raise RuntimeError("%s: plotline not found" % plotline_tag)
                 
                 n += 1
                             
-                chapter = Chapter(plotline=plotline,
-                                  novel=novel,
+                chapter = Chapter(novel=novel,
+                                  plotline=plotline,
                                   title=title,
                                   part=part,
                                   number=n,
                                   path=path)
                 novel.chapters.append(chapter)
-                if plotline is not None:
+                if plotline:
                     plotline.chapters.append(chapter)
-                if part is not None:
+                if part:
                     part.chapters.append(chapter)
             chaptersfile.close()
     

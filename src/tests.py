@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+
+import logging
+import logging.config
+
+logging.config.fileConfig("./logging.conf")
+logger = logging.getLogger("testLogger")
+
 import unittest
 import os
 import sys
@@ -96,7 +104,11 @@ class TestNovel(unittest.TestCase):
         self.assertEqual(len(self.novel.chapters), 1)
         self.assertIsNotNone(self.novel.find_chapter("1__first_test_chapter"))
         part = self.novel.find_part("1")
-        self.assertIn(self.novel.chapters[0], part.chapters)
+        chapter = self.novel.find_chapter("1__first_test_chapter")
+        self.assertIsNotNone(chapter)
+        self.assertIn(chapter, part.chapters)
+        self.assertIn(chapter, self.novel.parts[0].chapters)
+        self.assertNotIn(chapter, self.novel.parts[1].chapters)
     
     """
     " Update
@@ -123,19 +135,19 @@ class TestNovel(unittest.TestCase):
         self.assertEqual(self.novel.parts[1].tag, "4__part_1_modified")
     
     def testUpdateChapters(self):
+        self.tearDown()
+        self.setUp()
         add_part(self.novel)
         add_part(self.novel)
-        t = self.novel.parts[-2].tag
+        t = '1'
         add_chapter(self.novel, "main", title="AAA", part_tag=t)
         add_chapter(self.novel, "main", title="BBB", part_tag=t)
         
         #self.novel.load(self.proj_path)
         
-        p1 = self.novel.parts[-2]
-        p2 = self.novel.parts[-1]
         parts = self.novel.parts
-        for p in parts:
-            print(">> %s: %s" % (p, p.chapters))
+        p1 = parts[0]
+        p2 = parts[1]
         self.assertEqual(len(p1.chapters), 3)
         self.assertEqual(len(p2.chapters), 0)
         

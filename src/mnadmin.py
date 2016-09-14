@@ -6,6 +6,9 @@ import os
 import subprocess
 import shutil
 
+import logging
+logger = logging.getLogger(__name__)
+
 DFLT_CONFIG_FILE=os.path.abspath(
     os.path.expanduser('~/.makenovel/config'))
 CURRDIR = os.path.abspath('.')
@@ -41,7 +44,7 @@ def create_project(name, title, branch=None, path=None, config=None):
     if not os.path.exists(dest_data_dir):
         os.makedirs(dest_data_dir)
         
-    print("Creating project in %s\n" % dest_data_dir)
+    logger.info("Creating project in %s\n" % dest_data_dir)
     
     for f in ("novel", "chapters.csv", "parts.csv", 
               "plotlines.csv","versions.csv", "drafts.csv"):
@@ -59,14 +62,14 @@ def create_project(name, title, branch=None, path=None, config=None):
         
     os.chdir(projdir)
     subprocess.call([GIT, "init", "."])
-    print("[shell] %s %s %s" % (GIT, "init", "."))
+    logger.info("[shell] %s %s %s" % (GIT, "init", "."))
     if branch:
         subprocess.call([GIT, 'checkout', '-b', branch])
-        print("[shell] %s checkout -b %s" % (GIT, branch))
+        logger.info("[shell] %s checkout -b %s" % (GIT, branch))
     subprocess.call([GIT, "add", dest_data_dir])
-    print("[shell] %s %s %s" % (GIT, "add", dest_data_dir))
+    logger.info("[shell] %s %s %s" % (GIT, "add", dest_data_dir))
     subprocess.call([GIT, "commit", "-am", "makenovel - create project `%s'" % title])
-    print("[shell] %s commit -am \"makenovel - create project `%s'\"" % (GIT, title))
+    logger.info("[shell] %s commit -am \"makenovel - create project `%s'\"" % (GIT, title))
     
     os.chdir(currdir)
     
